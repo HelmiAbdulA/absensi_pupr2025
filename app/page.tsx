@@ -12,7 +12,7 @@ export default function Home() {
     if (raw) {
       router.replace('/dashboard')
     } else {
-      router.replace('/auth/login')
+      router.replace('/login')
     }
   }, [router])
 
