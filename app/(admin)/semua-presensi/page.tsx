@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -8,19 +9,41 @@ import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
-import { Download, Search } from 'lucide-react'
-import { Row } from '@/types'
-import { UNITS } from '@/constants'
+import { Download, FileSpreadsheet, FileText, Search, SortAsc, SortDesc } from 'lucide-react'
+import * as XLSX from 'xlsx'
+import jsPDF from 'jspdf'
+import autoTable from 'jspdf-autotable'
 
-type Status = 'HADIR' | 'IZIN' | 'SAKIT' | 'ALPHA'
+const UNITS = [
+  'Sekretariat',
+  'Bid. Bina Marga',
+  'Bid. Penataan Ruang',
+  'Bid. SDA',
+  'Bid. Bangunan',
+  'Bid. Jasa Konstruksi',
+  'Bid. AMPIP',
+  'UPT. Kecamatan',
+]
 
+type Status = 'HADIR' | 'IZIN' | 'SAKIT' | 'DL' | 'TK'
 
+type Row = {
+  id: string
+  tanggal: string
+  jam: string
+  unit: string
+  nama: string
+  nip: string
+  status: Status
+  deskripsi: string
+  admin: string
+}
 
 function rand<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] }
 
-function makeDummy(n = 200): Row[] {
+function makeDummy(n = 220): Row[] {
   const names = ['Budi','Siti','Andi','Rina','Tono','Dewi','Joko','Wati','Rudi','Lina','Farhan','Nadia','Asep','Yuni','Yoga']
-  const statuses: Status[] = ['HADIR','IZIN','SAKIT','ALPHA']
+  const statuses: Status[] = ['HADIR','IZIN','SAKIT','DL','TK']
   const out: Row[] = []
   const now = new Date()
   for (let i = 0; i < n; i++) {
@@ -40,26 +63,33 @@ function makeDummy(n = 200): Row[] {
       admin: 'Admin PUPR',
     })
   }
-  // urut terbaru di atas
-  return out.sort((a,b) => (b.tanggal + b.jam).localeCompare(a.tanggal + a.jam))
+  return out
 }
 
-const ALL = makeDummy(220)
+const ALL = makeDummy()
+
+type SortKey = 'unit' | 'nama' | null
+
+enum Dir { ASC = 'asc', DESC = 'desc' }
 
 export default function SemuaPresensiPage() {
-  // filter state
+  // filter
   const [q, setQ] = useState('')
   const [unit, setUnit] = useState('Semua Unit')
   const [status, setStatus] = useState('Semua Status')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
 
-  // pagination state
+  // sort
+  const [sortKey, setSortKey] = useState<SortKey>('unit')
+  const [sortDir, setSortDir] = useState<Dir>(Dir.ASC)
+
+  // pagination
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
   const filtered = useMemo(() => {
-    return ALL.filter((r) => {
+    const res = ALL.filter((r) => {
       if (unit !== 'Semua Unit' && r.unit !== unit) return false
       if (status !== 'Semua Status' && r.status !== (status as Status)) return false
       if (dateFrom && r.tanggal < dateFrom) return false
@@ -70,7 +100,14 @@ export default function SemuaPresensiPage() {
       }
       return true
     })
-  }, [q, unit, status, dateFrom, dateTo])
+    if (!sortKey) return res
+    return res.sort((a: Row, b: Row) => {
+      const va = a[sortKey] as string
+      const vb = b[sortKey] as string
+      const cmp = va.localeCompare(vb)
+      return sortDir === Dir.ASC ? cmp : -cmp
+    })
+  }, [q, unit, status, dateFrom, dateTo, sortKey, sortDir])
 
   const total = filtered.length
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -81,12 +118,27 @@ export default function SemuaPresensiPage() {
 
   function resetFilters() {
     setQ(''); setUnit('Semua Unit'); setStatus('Semua Status'); setDateFrom(''); setDateTo(''); setPage(1)
+    setSortKey('unit'); setSortDir(Dir.ASC)
+  }
+
+  // EXPORT HELPERS ---------------------------------
+  function getFilteredForExport() {
+    return filtered.map(r => ({
+      Tanggal: r.tanggal,
+      Jam: r.jam,
+      Unit: r.unit,
+      Nama: r.nama,
+      NIP: r.nip,
+      Status: r.status,
+      Deskripsi: r.deskripsi,
+      Admin: r.admin,
+    }))
   }
 
   function exportCSV() {
-    const header = ['Tanggal','Jam','Unit','Nama','NIP','Status','Deskripsi','Admin']
-    const rows = filtered.map(r => [r.tanggal, r.jam, r.unit, r.nama, r.nip, r.status, r.deskripsi, r.admin])
-    const csv = [header, ...rows].map(r => r.map((v) => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
+    const rows = getFilteredForExport()
+    const header = Object.keys(rows[0] || { Tanggal: '', Jam: '', Unit: '', Nama: '', NIP: '', Status: '', Deskripsi: '', Admin: '' })
+    const csv = [header.join(','), ...rows.map(r => header.map(h => `"${String((r as any)[h]).replace(/"/g,'""')}"`).join(','))].join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -96,22 +148,52 @@ export default function SemuaPresensiPage() {
     URL.revokeObjectURL(url)
   }
 
+  function exportXLSX() {
+    const rows = getFilteredForExport()
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(rows)
+    XLSX.utils.book_append_sheet(wb, ws, 'Presensi')
+    XLSX.writeFile(wb, `semua-presensi_${new Date().toISOString().slice(0,10)}.xlsx`)
+  }
+
+  function exportPDF() {
+    const rows = getFilteredForExport()
+    const doc = new jsPDF({ orientation: 'landscape' })
+    doc.text('Semua Presensi (hasil filter)', 14, 14)
+    autoTable(doc, {
+      head: [[ 'Tanggal','Jam','Unit','Nama','NIP','Status','Deskripsi','Admin' ]],
+      body: rows.map(r => [r.Tanggal, r.Jam, r.Unit, r.Nama, r.NIP, r.Status, r.Deskripsi, r.Admin]),
+      styles: { fontSize: 8 },
+      headStyles: { fillColor: [14, 90, 174] },
+      startY: 20,
+    })
+    doc.save(`semua-presensi_${new Date().toISOString().slice(0,10)}.pdf`)
+  }
+
+  function toggleSort(key: SortKey) {
+    if (sortKey !== key) { setSortKey(key); setSortDir(Dir.ASC); setPage(1); return }
+    setSortDir((d) => (d === Dir.ASC ? Dir.DESC : Dir.ASC))
+    setPage(1)
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Semua Presensi</h1>
-          <p className="text-sm text-slate-500">Lihat semua data presensi dengan filter dan pagination.</p>
+          <p className="text-sm text-slate-500">Filter, sorting Unit atau Nama, pagination, dan ekspor.</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={exportCSV}><Download className="h-4 w-4 mr-1"/> Unduh CSV</Button>
+          <Button variant="outline" onClick={exportCSV}><Download className="h-4 w-4 mr-1"/> CSV</Button>
+          <Button variant="outline" onClick={exportXLSX}><FileSpreadsheet className="h-4 w-4 mr-1"/> XLSX</Button>
+          <Button variant="outline" onClick={exportPDF}><FileText className="h-4 w-4 mr-1"/> PDF</Button>
         </div>
       </div>
 
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Filter</CardTitle></CardHeader>
         <CardContent>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
             <div className="xl:col-span-2">
               <div className="relative">
                 <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -137,23 +219,31 @@ export default function SemuaPresensiPage() {
                   <SelectItem value="HADIR">Hadir</SelectItem>
                   <SelectItem value="IZIN">Izin</SelectItem>
                   <SelectItem value="SAKIT">Sakit</SelectItem>
-                  <SelectItem value="ALPHA">Alpha</SelectItem>
+                  <SelectItem value="DL">DL</SelectItem>
+                  <SelectItem value="TK">TK</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div>
-              <Label className="text-xs text-slate-500">Dari Tanggal</Label>
-              <div className="flex items-center gap-2 mt-1">
-                <Input type="date" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1) }} />
-              </div>
+              <Label className="text-xs text-slate-500">Dari</Label>
+              <Input type="date" className="mt-1" value={dateFrom} onChange={(e) => { setDateFrom(e.target.value); setPage(1) }} />
             </div>
             <div>
-              <Label className="text-xs text-slate-500">Sampai Tanggal</Label>
-              <div className="flex items-center gap-2 mt-1">
-                <Input type="date" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1) }} />
+              <Label className="text-xs text-slate-500">Sampai</Label>
+              <Input type="date" className="mt-1" value={dateTo} onChange={(e) => { setDateTo(e.target.value); setPage(1) }} />
+            </div>
+            <div>
+              <Label className="text-xs text-slate-500">Urutkan</Label>
+              <div className="flex gap-2 mt-1">
+                <Button type="button" variant={sortKey === 'unit' ? 'default' : 'outline'} onClick={() => toggleSort('unit')} className={sortKey === 'unit' ? 'bg-[#003A70]' : ''}>
+                  Unit {sortKey === 'unit' && (sortDir === Dir.ASC ? <SortAsc className="ml-1 h-4 w-4"/> : <SortDesc className="ml-1 h-4 w-4"/>)}
+                </Button>
+                <Button type="button" variant={sortKey === 'nama' ? 'default' : 'outline'} onClick={() => toggleSort('nama')} className={sortKey === 'nama' ? 'bg-[#003A70]' : ''}>
+                  Nama {sortKey === 'nama' && (sortDir === Dir.ASC ? <SortAsc className="ml-1 h-4 w-4"/> : <SortDesc className="ml-1 h-4 w-4"/>)}
+                </Button>
               </div>
             </div>
-            <div className="flex items-end justify-start">
+            <div className="flex items-end">
               <Button variant="outline" onClick={resetFilters}>Reset</Button>
             </div>
           </div>
@@ -203,7 +293,8 @@ export default function SemuaPresensiPage() {
                       {r.status === 'HADIR' && <Badge className="bg-[#0E5AAE]">Hadir</Badge>}
                       {r.status === 'IZIN' && <Badge variant="secondary">Izin</Badge>}
                       {r.status === 'SAKIT' && <Badge variant="outline">Sakit</Badge>}
-                      {r.status === 'ALPHA' && <Badge variant="destructive">Alpha</Badge>}
+                      {r.status === 'DL' && <Badge variant="outline">DL</Badge>}
+                      {r.status === 'TK' && <Badge variant="destructive">TK</Badge>}
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{r.deskripsi}</TableCell>
                     <TableCell>{r.admin}</TableCell>

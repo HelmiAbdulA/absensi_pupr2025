@@ -1,4 +1,4 @@
-export type Status = 'HADIR' | 'IZIN' | 'SAKIT' | 'ALPHA'
+export type Status = 'HADIR' | 'IZIN' | 'SAKIT' | 'DL' | 'TK'
 
 export type AttendanceRow = {
   id: string
