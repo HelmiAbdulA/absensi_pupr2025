@@ -15,7 +15,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { NAV_ITEMS } from "@/constants";
-
+import Image from "next/image";
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -24,7 +24,15 @@ export function AppSidebar() {
     <Sidebar className="bg-white">
       <SidebarHeader>
         <div className="flex items-center gap-3 px-2 py-1.5">
-          <div className="h-8 w-8 rounded-md bg-[#F4C542]" />
+          <div className="h-8 w-8 rounded-md bg-[#F4C542]">
+            <Image
+              src="/logo.jpg"
+              alt="logo"
+              width={65}
+              height={65}
+              className=""
+            />
+          </div>
           <div className="leading-tight">
             <p className="text-sm font-semibold text-slate-900">
               Presensi PUPR

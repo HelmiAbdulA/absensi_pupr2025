@@ -1,20 +1,34 @@
-'use client'
+"use client";
 
-import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
 
-// Halaman root kosong -> redirect ke /dashboard jika login, atau ke /auth/login jika belum
 export default function Home() {
-  const router = useRouter()
+  const router = useRouter();
 
   useEffect(() => {
-    const raw = typeof window !== 'undefined' ? localStorage.getItem('pupr_admin_session') : null
-    if (raw) {
-      router.replace('/dashboard')
-    } else {
-      router.replace('/login')
-    }
-  }, [router])
+    let unsub = () => {};
 
-  return null
+    (async () => {
+      // cek session saat mount
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        router.replace("/dashboard");
+      } else {
+        router.replace("/login");
+      }
+
+      // dengarkan perubahan auth (mis. setelah login/logout)
+      const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session) router.replace("/dashboard");
+        else router.replace("/login");
+      });
+      unsub = () => sub.subscription.unsubscribe();
+    })();
+
+    return () => unsub();
+  }, [router]);
+
+  return null;
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,115 +10,132 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge'
 import { Download, FileDown, Printer, Search } from 'lucide-react'
 import {
-  PieChart as RePieChart,
-  Pie,
-  Cell,
-  BarChart as ReBarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  Legend,
-  ResponsiveContainer,
+  PieChart as RePieChart, Pie, Cell,
+  BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
+import * as XLSX from 'xlsx'
+import { supabase } from '@/lib/supabaseClient'
+import type { StatusKehadiran } from '@/types'
 
-const UNITS = [
-  'Sekretariat',
-  'Bid. Bina Marga',
-  'Bid. Penataan Ruang',
-  'Bid. SDA',
-  'Bid. Bangunan',
-  'Bid. Jasa Konstruksi',
-  'Bid. AMPIP',
-  'UPT. Kecamatan',
-]
+// =================== Types/Consts ===================
+type Status = StatusKehadiran // 'HADIR'|'IZIN'|'SAKIT'|'DL'|'TK'
 
-type Status = 'HADIR' | 'IZIN' | 'SAKIT' | 'DL' | 'TK'
-
-type Row = {
+type EntryRow = {
   id: string
-  tanggal: string // yyyy-mm-dd
-  jam: string // HH:mm
-  unit: string
-  nama: string
-  nip: string
-  status: Status
-  deskripsi: string
+  tanggal: string      // YYYY-MM-DD (from session)
+  jam_mulai: string    // HH:mm:ss
+  unit: string         // units.name
+  nama: string         // employees.nama
+  nip: string          // employees.nip
+  status: Status       // attendance_entries.status
+  deskripsi: string    // session.deskripsi
 }
 
-function rand<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] }
-
-function makeDummy(n = 360): Row[] {
-  const names = ['Budi','Siti','Andi','Rina','Tono','Dewi','Joko','Wati','Rudi','Lina','Farhan','Nadia','Asep','Yuni','Yoga']
-  const statuses: Status[] = ['HADIR','IZIN','SAKIT','DL','TK']
-  const out: Row[] = []
-  const now = new Date()
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now)
-    d.setDate(now.getDate() - Math.floor(Math.random() * 35))
-    const tanggal = d.toISOString().slice(0,10)
-    const jam = `${String(8 + (i % 9)).padStart(2,'0')}:${String(i % 60).padStart(2,'0')}`
-    out.push({
-      id: `LP-${i+1}`,
-      tanggal,
-      jam,
-      unit: rand(UNITS),
-      nama: rand(names) + (i % 8 === 0 ? ' ' + (i+1) : ''),
-      nip: `1979${String(1000 + i)}`,
-      status: rand(statuses),
-      deskripsi: i % 3 === 0 ? 'Rapat Koordinasi' : 'Kegiatan rutin',
-    })
-  }
-  return out
-}
-
-const ALL = makeDummy()
 const COLORS = ['#0E5AAE', '#F4C542', '#10B981', '#6366F1', '#EF4444'] // HADIR, IZIN, SAKIT, DL, TK
 
+// ====================================================
 export default function LaporanPage() {
+  // periode & filter
   const [range, setRange] = useState<'hari' | 'minggu' | 'bulan' | 'custom'>('hari')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [unit, setUnit] = useState('Semua Unit')
   const [q, setQ] = useState('')
 
+  // data
+  const [rows, setRows] = useState<EntryRow[]>([])
+  const [units, setUnits] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  // hitung range tanggal
   function computeDateRange() {
     const now = new Date()
+    const iso = (d: Date) => d.toISOString().slice(0,10)
     if (range === 'hari') {
-      const d = now.toISOString().slice(0,10)
+      const d = iso(now)
       return { from: d, to: d }
     }
     if (range === 'minggu') {
-      const to = now.toISOString().slice(0,10)
-      const past = new Date(now)
-      past.setDate(now.getDate() - 6)
-      const from = past.toISOString().slice(0,10)
-      return { from, to }
+      const to = iso(now)
+      const past = new Date(now); past.setDate(now.getDate() - 6)
+      return { from: iso(past), to }
     }
     if (range === 'bulan') {
-      const to = now.toISOString().slice(0,10)
-      const past = new Date(now)
-      past.setDate(now.getDate() - 29)
-      const from = past.toISOString().slice(0,10)
-      return { from, to }
+      const to = iso(now)
+      const past = new Date(now); past.setDate(now.getDate() - 29)
+      return { from: iso(past), to }
     }
     return { from: dateFrom || '1970-01-01', to: dateTo || '2999-12-31' }
   }
-
   const { from, to } = computeDateRange()
 
+  // =============== load units (dropdown) ===============
+  useEffect(() => {
+    let alive = true
+    supabase.from('units').select('name').order('name', { ascending: true }).then(({ data }) => {
+      if (!alive) return
+      setUnits((data || []).map(d => d.name))
+    })
+    return () => { alive = false }
+  }, [])
+
+  // =============== fetch entries berdasarkan date range ===============
+  useEffect(() => {
+    let alive = true
+    async function fetchData() {
+      setLoading(true); setErr(null)
+
+      // filter tanggal langsung di DB: sessions.tanggal between from..to
+      const { data, error } = await supabase
+        .from('attendance_entries')
+        .select(`
+          id,
+          status,
+          session:attendance_sessions ( tanggal, jam_mulai, deskripsi ),
+          employee:employees ( nama, nip, unit:unit_id ( name ) )
+        `)
+        .gte('session.tanggal', from)
+        .lte('session.tanggal', to)
+        .order('id', { ascending: false })
+
+      if (!alive) return
+
+      if (error) {
+        setErr(error.message); setLoading(false); return
+      }
+
+      const flat: EntryRow[] = (data || []).map((r: any) => ({
+        id: r.id,
+        status: r.status as Status,
+        tanggal: r.session?.tanggal || '',
+        jam_mulai: r.session?.jam_mulai || '',
+        deskripsi: r.session?.deskripsi || '',
+        nama: r.employee?.nama || '-',
+        nip: r.employee?.nip || '-',
+        unit: r.employee?.unit?.name || '-',
+      }))
+
+      setRows(flat)
+      setLoading(false)
+    }
+    fetchData()
+    return () => { alive = false }
+  }, [from, to])
+
+  // =============== filter client-side tambahan ===============
   const filtered = useMemo(() => {
-    return ALL.filter((r) => {
+    return rows.filter((r) => {
       if (unit !== 'Semua Unit' && r.unit !== unit) return false
-      if (r.tanggal < from || r.tanggal > to) return false
       if (q) {
         const text = `${r.nama} ${r.nip} ${r.unit} ${r.deskripsi}`.toLowerCase()
         if (!text.includes(q.toLowerCase())) return false
       }
       return true
     })
-  }, [unit, from, to, q])
+  }, [rows, unit, q])
 
+  // =============== agregasi ===============
   const dist = useMemo(() => {
     const base: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 }
     filtered.forEach((r) => { base[r.status] += 1 })
@@ -135,10 +152,10 @@ export default function LaporanPage() {
 
   const pieData = useMemo(() => ([
     { name: 'Hadir', value: dist.base.HADIR },
-    { name: 'Izin', value: dist.base.IZIN },
+    { name: 'Izin',  value: dist.base.IZIN  },
     { name: 'Sakit', value: dist.base.SAKIT },
-    { name: 'DL', value: dist.base.DL },
-    { name: 'TK', value: dist.base.TK },
+    { name: 'DL',    value: dist.base.DL    },
+    { name: 'TK',    value: dist.base.TK    },
   ]), [dist])
 
   const byUnit = useMemo(() => {
@@ -157,10 +174,10 @@ export default function LaporanPage() {
       if (!map[key]) map[key] = { nama: r.nama, nip: r.nip, unit: r.unit, total: 0, hadir: 0, izin: 0, sakit: 0, dl: 0, tk: 0 }
       map[key].total++
       if (r.status === 'HADIR') map[key].hadir++
-      if (r.status === 'IZIN') map[key].izin++
+      if (r.status === 'IZIN')  map[key].izin++
       if (r.status === 'SAKIT') map[key].sakit++
-      if (r.status === 'DL') map[key].dl++
-      if (r.status === 'TK') map[key].tk++
+      if (r.status === 'DL')    map[key].dl++
+      if (r.status === 'TK')    map[key].tk++
     })
     const rows = Object.values(map).map((p) => ({
       ...p,
@@ -169,10 +186,11 @@ export default function LaporanPage() {
     return rows.sort((a,b) => b.persenHadir - a.persenHadir)
   }, [filtered])
 
+  // =============== export CSV ===============
   function exportCSVPersons() {
     const header = ['Nama','NIP','Unit','Total','Hadir','Izin','Sakit','DL','TK','% Hadir']
-    const rows = byPerson.map(p => [p.nama, p.nip, p.unit, p.total, p.hadir, p.izin, p.sakit, p.dl, p.tk, p.persenHadir])
-    const csv = [header, ...rows].map(r => r.join(',')).join('')
+    const items = byPerson.map(p => [p.nama, p.nip, p.unit, p.total, p.hadir, p.izin, p.sakit, p.dl, p.tk, p.persenHadir])
+    const csv = [header, ...items].map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -184,8 +202,8 @@ export default function LaporanPage() {
 
   function exportCSVUnits() {
     const header = ['Unit','Hadir','Izin','Sakit','DL','TK']
-    const rows = byUnit.map(u => [u.unit, u.HADIR, u.IZIN, u.SAKIT, u.DL, u.TK])
-    const csv = [header, ...rows].map(r => r.join(',')).join('')
+    const items = byUnit.map(u => [u.unit, u.HADIR, u.IZIN, u.SAKIT, u.DL, u.TK])
+    const csv = [header, ...items].map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -199,6 +217,7 @@ export default function LaporanPage() {
     window.print()
   }
 
+  // =============== UI ===============
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
@@ -219,7 +238,7 @@ export default function LaporanPage() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
             <div>
               <Label className="text-xs text-slate-500">Periode</Label>
-              <Select value={range} onValueChange={(v: 'hari'|'minggu'|'bulan'|'custom') => { setRange(v) }}>
+              <Select value={range} onValueChange={(v: 'hari'|'minggu'|'bulan'|'custom') => setRange(v)}>
                 <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="hari">Hari ini</SelectItem>
@@ -243,7 +262,7 @@ export default function LaporanPage() {
                 <SelectTrigger className="mt-1"><SelectValue placeholder="Unit" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Semua Unit">Semua Unit</SelectItem>
-                  {UNITS.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
+                  {units.map(u => <SelectItem key={u} value={u}>{u}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -255,6 +274,7 @@ export default function LaporanPage() {
               </div>
             </div>
           </div>
+          {err && <div className="text-sm text-red-600 mt-2">{err}</div>}
         </CardContent>
       </Card>
 
@@ -267,9 +287,7 @@ export default function LaporanPage() {
                 <Tooltip />
                 <Legend verticalAlign="bottom" height={36} />
                 <Pie dataKey="value" data={pieData} outerRadius={100} label>
-                  {pieData.map((_, i) => (
-                    <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                  ))}
+                  {pieData.map((_, i) => (<Cell key={i} fill={COLORS[i % COLORS.length]} />))}
                 </Pie>
               </RePieChart>
             </ResponsiveContainer>
@@ -293,10 +311,10 @@ export default function LaporanPage() {
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="HADIR" fill={COLORS[0]} radius={[6,6,0,0]} />
-                <Bar dataKey="IZIN" fill={COLORS[1]} radius={[6,6,0,0]} />
+                <Bar dataKey="IZIN"  fill={COLORS[1]} radius={[6,6,0,0]} />
                 <Bar dataKey="SAKIT" fill={COLORS[2]} radius={[6,6,0,0]} />
-                <Bar dataKey="DL" fill={COLORS[3]} radius={[6,6,0,0]} />
-                <Bar dataKey="TK" fill={COLORS[4]} radius={[6,6,0,0]} />
+                <Bar dataKey="DL"    fill={COLORS[3]} radius={[6,6,0,0]} />
+                <Bar dataKey="TK"    fill={COLORS[4]} radius={[6,6,0,0]} />
               </ReBarChart>
             </ResponsiveContainer>
           </CardContent>

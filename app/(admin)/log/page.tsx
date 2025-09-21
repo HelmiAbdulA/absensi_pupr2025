@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,82 +12,66 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { Separator } from '@/components/ui/separator'
 import { Eye, Download, Search } from 'lucide-react'
+import { supabase } from '@/lib/supabaseClient'
 
-// ---------------------------------------------
-// DUMMY DATA
-// ---------------------------------------------
-
-type ActionType = 'LOGIN' | 'ADD_PEGAWAI' | 'UPDATE_PEGAWAI' | 'DELETE_PEGAWAI' | 'CREATE_PRESENSI' | 'UPDATE_PRESENSI' | 'EXPORT_DATA'
+// ================= Types =================
+type DbAction = 'CREATE_SESSION' | 'SET_STATUS' | 'EXPORT' | string
 
 type LogRow = {
   id: string
-  waktu: string // ISO string
-  admin: string
-  aksi: ActionType
-  target: string // subjek yang dimodifikasi
-  ringkas: string // ringkasan singkat
+  waktu: string   // ISO
+  admin: string   // full_name atau '-'
+  aksi: DbAction
+  target: string  // target_id (ringkas)
+  ringkas: string // dari meta/action
   lama?: Record<string, any> | null
   baru?: Record<string, any> | null
+  raw?: any
 }
 
-const ADMINS = ['Admin PUPR','Operator 1','Operator 2']
-
-function rand<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)] }
-
-function makeDummy(n = 120): LogRow[] {
-  const out: LogRow[] = []
-  const now = new Date()
-  for (let i = 0; i < n; i++) {
-    const d = new Date(now)
-    d.setMinutes(now.getMinutes() - i * 13)
-    const aksi: ActionType = ['LOGIN','ADD_PEGAWAI','UPDATE_PEGAWAI','DELETE_PEGAWAI','CREATE_PRESENSI','UPDATE_PRESENSI','EXPORT_DATA'][i % 7] as ActionType
-    const base: LogRow = {
-      id: `LOG-${i + 1}`,
-      waktu: d.toISOString(),
-      admin: rand(ADMINS),
-      aksi,
-      target: aksi.includes('PEGAWAI') ? `NIP 1979${1000 + (i % 50)}` : aksi.includes('PRESENSI') ? `Sesi ${String(100 + (i % 12))}` : 'Sistem',
-      ringkas: '',
-      lama: null,
-      baru: null,
-    }
-    if (aksi === 'LOGIN') base.ringkas = 'Login berhasil'
-    if (aksi === 'ADD_PEGAWAI') { base.ringkas = 'Tambah pegawai'; base.baru = { nama: 'Budi', nip: `1979${1100 + i}`, unit: 'Sekretariat' } }
-    if (aksi === 'UPDATE_PEGAWAI') { base.ringkas = 'Ubah jabatan pegawai'; base.lama = { jabatan: 'Staf' }; base.baru = { jabatan: 'Analis' } }
-    if (aksi === 'DELETE_PEGAWAI') { base.ringkas = 'Nonaktifkan pegawai'; base.lama = { aktif: true }; base.baru = { aktif: false } }
-    if (aksi === 'CREATE_PRESENSI') { base.ringkas = 'Buat sesi presensi'; base.baru = { tanggal: d.toISOString().slice(0,10), deskripsi: 'Rapat Koordinasi' } }
-    if (aksi === 'UPDATE_PRESENSI') { base.ringkas = 'Ubah status presensi'; base.lama = { status: 'IZIN' }; base.baru = { status: 'HADIR' } }
-    if (aksi === 'EXPORT_DATA') base.ringkas = 'Ekspor CSV Laporan'
-    out.push(base)
-  }
-  return out
-}
-
-const ALL = makeDummy(160)
-
+// =============== Helpers ===============
 function formatWaktu(iso: string) {
   const d = new Date(iso)
   return d.toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })
 }
 
-function actionBadge(a: ActionType) {
-  const map: Record<ActionType, { label: string; variant?: 'secondary'|'outline'|'destructive' } > = {
-    LOGIN: { label: 'Login', variant: 'outline' },
-    ADD_PEGAWAI: { label: 'Tambah Pegawai', variant: 'secondary' },
-    UPDATE_PEGAWAI: { label: 'Ubah Pegawai', variant: 'outline' },
-    DELETE_PEGAWAI: { label: 'Hapus Pegawai', variant: 'destructive' },
-    CREATE_PRESENSI: { label: 'Buat Presensi', variant: 'secondary' },
-    UPDATE_PRESENSI: { label: 'Ubah Presensi', variant: 'outline' },
-    EXPORT_DATA: { label: 'Ekspor Data', variant: 'outline' },
+function actionBadge(a: DbAction) {
+  const map: Record<string, { label: string; variant?: 'secondary'|'outline'|'destructive' }> = {
+    CREATE_SESSION: { label: 'Buat Sesi', variant: 'secondary' },
+    SET_STATUS:     { label: 'Ubah Presensi', variant: 'outline' },
+    EXPORT:         { label: 'Ekspor', variant: 'outline' },
   }
-  const cfg = map[a]
+  const cfg = map[a] ?? { label: a, variant: 'outline' }
   return <Badge variant={cfg.variant}>{cfg.label}</Badge>
 }
 
+function ringkasFrom(action: DbAction, meta: any): string {
+  if (action === 'CREATE_SESSION') {
+    const tgl = meta?.tanggal ?? meta?.tgl ?? ''
+    return `Buat sesi presensi ${tgl}`
+  }
+  if (action === 'SET_STATUS') {
+    const s = meta?.status ?? meta?.sts ?? '-'
+    const n = meta?.count ?? meta?.jumlah ?? ''
+    return `Set status ${s}${n ? ` (${n} pegawai)` : ''}`
+  }
+  if (action === 'EXPORT') {
+    const what = meta?.type ?? meta?.what ?? 'data'
+    return `Ekspor ${what}`
+  }
+  // fallback
+  return meta ? JSON.stringify(meta) : ''
+}
+
+// ================= Page =================
 export default function LogPage() {
+  const [rows, setRows] = useState<LogRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [err, setErr] = useState<string | null>(null)
+
   // filter state
   const [q, setQ] = useState('')
-  const [aksi, setAksi] = useState<'Semua' | ActionType>('Semua')
+  const [aksi, setAksi] = useState<'Semua' | DbAction>('Semua')
   const [admin, setAdmin] = useState<'Semua' | string>('Semua')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -96,8 +80,60 @@ export default function LogPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
+  // load from Supabase
+  useEffect(() => {
+    let alive = true
+    async function load() {
+      setLoading(true); setErr(null)
+
+      // 1) ambil log mentah
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .select('id, at, actor_id, action, target_id, meta')
+        .order('at', { ascending: false })
+        .limit(2000) // batasi agar aman di client
+
+      if (!alive) return
+      if (error) { setErr(error.message); setLoading(false); return }
+
+      const actorIds = Array.from(new Set((data || []).map(r => r.actor_id).filter(Boolean))) as string[]
+
+      // 2) mapping actor_id -> full_name (admin_profiles)
+      let nameMap = new Map<string, string>()
+      if (actorIds.length) {
+        const { data: admins } = await supabase
+          .from('admin_profiles')
+          .select('user_id, full_name')
+          .in('user_id', actorIds)
+        nameMap = new Map((admins || []).map(a => [a.user_id, a.full_name || 'Admin']))
+      }
+
+      // 3) transform ke bentuk UI
+      const flat: LogRow[] = (data || []).map((r: any) => ({
+        id: String(r.id),
+        waktu: r.at,
+        admin: nameMap.get(r.actor_id) || '-',
+        aksi: r.action as DbAction,
+        target: r.target_id ?? '-',
+        ringkas: ringkasFrom(r.action, r.meta),
+        lama: r.meta?.old ?? null,
+        baru: r.meta?.new ?? null,
+        raw: r,
+      }))
+
+      setRows(flat)
+      setLoading(false)
+    }
+    load()
+    return () => { alive = false }
+  }, [])
+
+  // dropdown dinamis dari data
+  const allActions = useMemo<DbAction[]>(() => Array.from(new Set(rows.map(r => r.aksi))), [rows])
+  const allAdmins = useMemo<string[]>(() => Array.from(new Set(rows.map(r => r.admin).filter(Boolean))), [rows])
+
   const filtered = useMemo(() => {
-    return ALL.filter((r) => {
+    return rows.filter((r) => {
       if (aksi !== 'Semua' && r.aksi !== aksi) return false
       if (admin !== 'Semua' && r.admin !== admin) return false
       const tgl = r.waktu.slice(0,10)
@@ -109,7 +145,7 @@ export default function LogPage() {
       }
       return true
     })
-  }, [q, aksi, admin, dateFrom, dateTo])
+  }, [rows, q, aksi, admin, dateFrom, dateTo])
 
   const total = filtered.length
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
@@ -124,8 +160,8 @@ export default function LogPage() {
 
   function exportCSV() {
     const header = ['Waktu','Admin','Aksi','Target','Ringkasan']
-    const rows = filtered.map(r => [formatWaktu(r.waktu), r.admin, r.aksi, r.target, r.ringkas])
-    const csv = [header, ...rows].map(r => r.map((v) => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
+    const rowsCsv = filtered.map(r => [formatWaktu(r.waktu), r.admin, r.aksi, r.target, r.ringkas])
+    const csv = [header, ...rowsCsv].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -140,7 +176,7 @@ export default function LogPage() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">Log Aktivitas</h1>
-          <p className="text-sm text-slate-500">Jejak aksi admin. Bisa difilter dan diekspor.</p>
+          <p className="text-sm text-slate-500">Jejak aksi admin dari database.</p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={exportCSV}><Download className="h-4 w-4 mr-1"/> Ekspor CSV</Button>
@@ -160,27 +196,21 @@ export default function LogPage() {
             </div>
             <div>
               <Label className="text-xs text-slate-500">Aksi</Label>
-              <Select value={aksi} onValueChange={(v: any) => { setAksi(v); setPage(1) }}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+              <Select value={aksi} onValueChange={(v: DbAction | 'Semua') => { setAksi(v); setPage(1) }}>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Semua" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Semua">Semua</SelectItem>
-                  <SelectItem value="LOGIN">Login</SelectItem>
-                  <SelectItem value="ADD_PEGAWAI">Tambah Pegawai</SelectItem>
-                  <SelectItem value="UPDATE_PEGAWAI">Ubah Pegawai</SelectItem>
-                  <SelectItem value="DELETE_PEGAWAI">Hapus Pegawai</SelectItem>
-                  <SelectItem value="CREATE_PRESENSI">Buat Presensi</SelectItem>
-                  <SelectItem value="UPDATE_PRESENSI">Ubah Presensi</SelectItem>
-                  <SelectItem value="EXPORT_DATA">Ekspor Data</SelectItem>
+                  {allActions.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
             <div>
               <Label className="text-xs text-slate-500">Admin</Label>
               <Select value={admin} onValueChange={(v) => { setAdmin(v); setPage(1) }}>
-                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectTrigger className="mt-1"><SelectValue placeholder="Semua" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Semua">Semua</SelectItem>
-                  {ADMINS.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                  {allAdmins.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -196,6 +226,7 @@ export default function LogPage() {
               <Button variant="outline" onClick={resetFilters}>Reset</Button>
             </div>
           </div>
+          {err && <div className="text-sm text-red-600 mt-2">{err}</div>}
         </CardContent>
       </Card>
 
@@ -228,7 +259,10 @@ export default function LogPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {pageRows.map((r) => (
+                {loading && (
+                  <TableRow><TableCell colSpan={6} className="text-sm text-slate-500">Memuat data…</TableCell></TableRow>
+                )}
+                {!loading && pageRows.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">{formatWaktu(r.waktu)}</TableCell>
                     <TableCell className="whitespace-nowrap">{r.admin}</TableCell>
@@ -266,7 +300,7 @@ export default function LogPage() {
                     </TableCell>
                   </TableRow>
                 ))}
-                {pageRows.length === 0 && (
+                {!loading && pageRows.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-sm text-slate-500 py-10">Tidak ada data sesuai filter.</TableCell>
                   </TableRow>
