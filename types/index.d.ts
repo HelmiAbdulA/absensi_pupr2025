@@ -244,3 +244,26 @@ export type QueryResult<T> = QuerySuccess<T> | QueryFailure;
  *   .select('*')
  *   .returns<Employee[]>(); // supaya tidak any
  */
+
+
+// === NEW: presensi map & entries lite ===
+export type DataPresensi = Record<string, Status> // employee_id -> status
+
+export type AttendanceEntryLite = {
+  employee_id: string
+  status: Status
+  // opsional kalau mau tahu unit-nya saat hydrate:
+  employees?: { unit_id: string } | null
+}
+
+// tambahkan ini kalau mau simpan ringkas jumlah status di list:
+export type SessionLite = {
+  id: string
+  tanggal: string
+  jam_mulai: string
+  jam_akhir: string
+  deskripsi: string | null
+  created_at: string
+  // optional ringkasan jumlah per status (tidak wajib)
+  counts?: Partial<Record<Status, number>>
+}
