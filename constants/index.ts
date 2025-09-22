@@ -19,7 +19,6 @@ export const NAV_ITEMS = [
   { title: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { title: "Pegawai", href: "/pegawai", icon: Users },
   { title: "Presensi", href: "/presensi", icon: ClipboardList },
-  { title: "Semua Presensi", href: "/semua-presensi", icon: Table2 },
   { title: "Laporan", href: "/laporan", icon: PieChart },
   { title: "Log Aktivitas", href: "/log", icon: History },
   { title: "Pengaturan", href: "/settings", icon: Settings },
