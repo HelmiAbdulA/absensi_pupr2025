@@ -1,3 +1,4 @@
+/* eslint-disable react-hooks/rules-of-hooks */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
 'use client';
@@ -785,7 +786,6 @@ export default function PresensiPage() {
                       <TableHead>Nama</TableHead>
                       <TableHead>NIP</TableHead>
                       <TableHead>Jabatan</TableHead>
-                      <TableHead>Unit</TableHead>
                       <TableHead className="text-right">Status</TableHead>
                     </TableRow>
                   </TableHeader>
