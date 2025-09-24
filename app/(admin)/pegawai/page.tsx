@@ -13,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Plus, Search, Pencil } from 'lucide-react'
+import { Plus, Search, Pencil, ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight } from 'lucide-react'
 import { supabase } from '@/lib/supabaseClient'
 import type { Employee, Unit, StatusPegawai } from '@/types'
 
@@ -47,6 +47,10 @@ export default function PegawaiPage() {
   const [editJabatan, setEditJabatan] = useState('')
   const [editUnitId, setEditUnitId] = useState('')
   const [editStatusPg, setEditStatusPg] = useState<StatusPegawai | ''>('')
+
+  // ========= NEW: Pagination state =========
+  const [pageSize, setPageSize] = useState<number>(10)
+  const [currentPage, setCurrentPage] = useState<number>(1) // 1-based
 
   // ===== LOAD DATA =====
   useEffect(() => {
@@ -92,6 +96,25 @@ export default function PegawaiPage() {
       return true
     })
   }, [employees, unitFilter, statusFilter, q, unitNameById])
+
+  // ========= NEW: Keep pagination sane when filter/search/pageSize change =========
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(filtered.length / pageSize)), [filtered.length, pageSize])
+
+  // Reset page to 1 saat filter/search berubah
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [q, unitFilter, statusFilter, pageSize])
+
+  // Clamp currentPage jika melewati totalPages (misal data berkurang)
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages)
+  }, [currentPage, totalPages])
+
+  // Data yang ditampilkan di tabel (slice dari filtered)
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    return filtered.slice(start, start + pageSize)
+  }, [filtered, currentPage, pageSize])
 
   function resetAddForm() {
     setNama(''); setNip(''); setJabatan(''); setUnitId(''); setStatusPg('')
@@ -316,7 +339,6 @@ export default function PegawaiPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nama</TableHead>
-                  <TableHead>NIP</TableHead>
                   <TableHead>Jabatan</TableHead>
                   <TableHead>Unit</TableHead>
                   <TableHead>Status</TableHead>
@@ -326,12 +348,12 @@ export default function PegawaiPage() {
               </TableHeader>
               <TableBody>
                 {loading && <TableSkeleton />}
-                {!loading && filtered.map((p) => {
+
+                {!loading && paginated.map((p) => {
                   const unitName = unitNameById.get(p.unit_id) || p.units?.name || "-"
                   return (
                     <TableRow key={p.id}>
-                      <TableCell className="whitespace-nowrap">{p.nama}</TableCell>
-                      <TableCell>{p.nip}</TableCell>
+                      <TableCell className="whitespace-nowrap">{p.nama} <br /> {p.nip}</TableCell>
                       <TableCell className="whitespace-nowrap">{p.jabatan}</TableCell>
                       <TableCell className="whitespace-nowrap">{unitName}</TableCell>
                       <TableCell>
@@ -358,16 +380,93 @@ export default function PegawaiPage() {
                     </TableRow>
                   )
                 })}
-                {!loading && filtered.length === 0 && (
+
+                {!loading && paginated.length === 0 && (
                   <TableRow><TableCell colSpan={7} className="text-slate-500">Tidak ada data.</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
           </div>
 
+          {/* ========= NEW: Pagination controls ========= */}
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-slate-500">
+              Total: {filtered.length} dari {employees.length} pegawai
+              {filtered.length > 0 && (
+                <>
+                  {' · '}
+                  Menampilkan{' '}
+                  {((currentPage - 1) * pageSize) + 1}
+                  {'–'}
+                  {Math.min(currentPage * pageSize, filtered.length)}
+                  {' '}dari {filtered.length}
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-600">Rows per page</span>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => setPageSize(Number(v))}
+                >
+                  <SelectTrigger className="h-8 w-20">
+                    <SelectValue placeholder={String(pageSize)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[5, 10, 20, 50, 100].map(n => (
+                      <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1 || loading || filtered.length === 0}
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1 || loading || filtered.length === 0}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+
+                <span className="mx-2 text-xs text-slate-600">
+                  Page {currentPage} / {totalPages}
+                </span>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || loading || filtered.length === 0}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages || loading || filtered.length === 0}
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
           {error && <div className="text-sm text-red-600 mt-2">{error}</div>}
           <Separator className="my-3" />
-          <div className="text-xs text-slate-500">Total: {filtered.length} dari {employees.length} pegawai</div>
+          {/* note: ringkasan total sudah dipindah ke atas pagination agar tetap terlihat */}
         </CardContent>
       </Card>
 

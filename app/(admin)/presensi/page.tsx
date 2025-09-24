@@ -17,11 +17,11 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 
 import {
   CalendarDays, ClipboardList, History as HistoryIcon, Users,
-  SortAsc, SortDesc, CheckCircle2, RefreshCcw, PlusCircle, Download,
+  SortAsc, SortDesc, CheckCircle2, RefreshCcw, PlusCircle,
+  ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight,
 } from 'lucide-react';
 
 /** =========================================================
@@ -97,7 +97,7 @@ function RowStatusControl({
         <Button
           size="sm"
           variant={isHadir ? 'default' : 'ghost'}
-          className={isHadir ? 'bg-[#003A70]' : ''}
+          className={isHadir ? 'bg-[#28A745]' : ''}
           onClick={() => onChange('HADIR')}
         >
           Hadir
@@ -105,6 +105,7 @@ function RowStatusControl({
         <Button
           size="sm"
           variant={isTidakHadir ? 'default' : 'ghost'}
+          className={isTidakHadir ? 'bg-[#FFC107]' : ''}
           onClick={() => onChange('IZIN')} // default ke IZIN saat toggle ke tidak hadir
         >
           Tidak hadir
@@ -164,7 +165,7 @@ function SummaryCounts({
       TK: 0,
     };
     baseRows.forEach((p) => {
-      const raw = statusByEmp[p.id] as Status | undefined;
+      const raw = (statusByEmp[p.id] as Status | undefined);
       const key = (raw ?? 'UNSET') as 'UNSET' | Status;
       t[key] += 1;
     });
@@ -195,10 +196,6 @@ type SortBy = 'nama' | 'jabatan';
 
 export default function PresensiPage() {
   /** ---------- Stepper: SEKARANG 4 LANGKAH ---------- */
-  // 1. Sumber data (Buat baru / Gunakan dari riwayat)
-  // 2. Detail sesi
-  // 3. Unit & Pegawai
-  // 4. Ringkasan
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   /** ---------- Step 2: Detail sesi ---------- */
@@ -217,6 +214,10 @@ export default function PresensiPage() {
   const [sessions, setSessions] = useState<SessionWithCounts[]>([]);
   const [loadingSessions, setLoadingSessions] = useState<boolean>(false);
 
+  /** ---------- NEW: Pagination state untuk tabel Riwayat ---------- */
+  const [sessPageSize, setSessPageSize] = useState<number>(10);
+  const [sessPage, setSessPage] = useState<number>(1); // 1-based
+
   /** ---------- Unit & status selection ---------- */
   const [unitChecked, setUnitChecked] = useState<Record<string, boolean>>({});
   const [statusByEmp, setStatusByEmp] = useState<Record<string, Status | undefined>>({});
@@ -225,6 +226,14 @@ export default function PresensiPage() {
   const [sortBy, setSortBy] = useState<SortBy>('nama');
   const [sortNamaDir, setSortNamaDir] = useState<Dir>('asc');
   const [sortJabatanDir, setSortJabatanDir] = useState<Dir>('asc');
+
+  /** ---------- Save states (existing) ---------- */
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState<{ sesiId: string; tally: Record<Status, number> } | null>(null);
+
+  /** ---------- NEW sebelumnya: Quick save (tetap pertahankan) ---------- */
+  const [savingQuick, setSavingQuick] = useState(false);
+  const [quickSavedAt, setQuickSavedAt] = useState<string | null>(null);
 
   /** ---------- Load master (units, employees) ---------- */
   useEffect(() => {
@@ -359,7 +368,6 @@ export default function PresensiPage() {
     setDeskripsi('');
   }
   function startFromScratch() {
-    // dipanggil dari Step 1 (Buat Baru)
     resetDetail();
     setUnitChecked({});
     setStatusByEmp({});
@@ -370,10 +378,9 @@ export default function PresensiPage() {
     setStep(3);
   }
 
-  /** ---------- Load status dari sesi lama (digunakan di Step 1) ---------- */
+  /** ---------- Load status dari sesi lama ---------- */
   async function useFromHistory(sid: string) {
     setErrMsg(null);
-    // 1) ambil sesi untuk prefill detail
     const sQ = await supabase
       .from('attendance_sessions')
       .select('id,tanggal,jam_mulai,jam_akhir,deskripsi')
@@ -385,13 +392,11 @@ export default function PresensiPage() {
       return;
     }
 
-    // set detail (bisa diedit di Step 2)
     setTanggal(sQ.data.tanggal);
     setJamMulai(fmtTime(sQ.data.jam_mulai));
     setJamAkhir(fmtTime(sQ.data.jam_akhir));
     setDeskripsi(sQ.data.deskripsi ?? '');
 
-    // 2) ambil entries-nya, mapping employee_id -> status
     const eQ = await supabase
       .from('attendance_entries')
       .select('employee_id,status')
@@ -410,22 +415,16 @@ export default function PresensiPage() {
       if (emp) unitIds.add(emp.unit_id);
     });
 
-    // centang unit yang diperlukan
     const uChecked: Record<string, boolean> = {};
     unitIds.forEach((uid) => (uChecked[uid] = true));
     setUnitChecked(uChecked);
 
-    // set statusByEmp
     setStatusByEmp(map);
 
-    // lanjut ke Step 2 untuk cek/ubah detail
     setStep(2);
   }
 
   /** ---------- Save (create session + bulk set) ---------- */
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<{ sesiId: string; tally: Record<Status, number> } | null>(null);
-
   async function handleSave() {
     setErrMsg(null);
     const selections = Object.entries(statusByEmp).filter(([_, b]) => !!b) as [string, Status][];
@@ -434,7 +433,6 @@ export default function PresensiPage() {
     try {
       setSaving(true);
 
-      // 1) Create session via API
       const resCreate = await fetch('/api/sessions/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -449,11 +447,9 @@ export default function PresensiPage() {
       if (!resCreate.ok) throw new Error(jsonCreate?.error?.message || 'Gagal membuat sesi');
       const sessionId: string = jsonCreate.id;
 
-      // 2) bucket per status
       const bucketMap: Record<Status, string[]> = { HADIR: [], IZIN: [], SAKIT: [], DL: [], TK: [] };
       for (const [empId, s] of selections) bucketMap[s].push(empId);
 
-      // 3) POST bulk per status
       const calls = (Object.keys(bucketMap) as Status[]).map(async (s) => {
         const arr = bucketMap[s];
         if (arr.length === 0) return null;
@@ -476,11 +472,8 @@ export default function PresensiPage() {
 
       await Promise.all(calls);
 
-      // tally ringkasan
       const tally: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 };
-      selections.forEach(([_, s]) => {
-        tally[s] += 1;
-      });
+      selections.forEach(([_, s]) => { tally[s] += 1; });
 
       setSaved({ sesiId: sessionId, tally });
       setStep(4);
@@ -488,6 +481,66 @@ export default function PresensiPage() {
       setErrMsg(e?.message || 'Terjadi kesalahan saat menyimpan.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  /** ---------- Quick Save (tanpa pindah step) ---------- */
+  async function handleQuickSave() {
+    setErrMsg(null);
+    const selections = Object.entries(statusByEmp).filter(([_, b]) => !!b) as [string, Status][];
+    if (selections.length === 0) return;
+
+    try {
+      setSavingQuick(true);
+
+      const resCreate = await fetch('/api/sessions/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          p_tanggal: tanggal,
+          p_mulai: jamMulai,
+          p_akhir: jamAkhir,
+          p_deskripsi: deskripsi || null,
+        }),
+      });
+      const jsonCreate = await resCreate.json();
+      if (!resCreate.ok) throw new Error(jsonCreate?.error?.message || 'Gagal membuat sesi');
+      const sessionId: string = jsonCreate.id;
+
+      const bucketMap: Record<Status, string[]> = { HADIR: [], IZIN: [], SAKIT: [], DL: [], TK: [] };
+      for (const [empId, s] of selections) bucketMap[s].push(empId);
+
+      const calls = (Object.keys(bucketMap) as Status[]).map(async (s) => {
+        const arr = bucketMap[s];
+        if (arr.length === 0) return null;
+        const res = await fetch('/api/attendance/bulk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            p_session_id: sessionId,
+            p_rows: arr,
+            p_status: s,
+            p_note: null,
+          }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.error?.message || `Gagal set status ${s}`);
+        }
+        return true;
+      });
+
+      await Promise.all(calls);
+
+      const tally: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 };
+      selections.forEach(([_, s]) => { tally[s] += 1; });
+      setSaved({ sesiId: sessionId, tally });
+
+      setQuickSavedAt(new Date().toISOString());
+    } catch (e: any) {
+      setErrMsg(e?.message || 'Terjadi kesalahan saat menyimpan.');
+    } finally {
+      setSavingQuick(false);
     }
   }
 
@@ -499,7 +552,8 @@ export default function PresensiPage() {
     setStep(1);
   }
 
-  /** ---------- Render ---------- */
+  /** ---------- Derived UI ---------- */
+  const unitMapLocal = unitMap;
   const unitsSelectedCount = unitsSelected.length;
 
   const sortedRows = useMemo(() => {
@@ -517,6 +571,30 @@ export default function PresensiPage() {
     });
     return rows;
   }, [baseRows, sortBy, sortNamaDir, sortJabatanDir]);
+
+  /** ---------- NEW: Pagination derived untuk Riwayat ---------- */
+  const sessTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(sessions.length / sessPageSize)),
+    [sessions.length, sessPageSize]
+  );
+
+  useEffect(() => {
+    // reset ke halaman 1 saat ukuran halaman berubah / data riwayat berubah
+    setSessPage(1);
+  }, [sessPageSize, sessions]);
+
+  useEffect(() => {
+    // clamp jika halaman > total halaman (misal data riwayat jadi lebih sedikit)
+    if (sessPage > sessTotalPages) setSessPage(sessTotalPages);
+  }, [sessPage, sessTotalPages]);
+
+  const sessionsPaginated = useMemo(() => {
+    const start = (sessPage - 1) * sessPageSize;
+    return sessions.slice(start, start + sessPageSize);
+  }, [sessions, sessPage, sessPageSize]);
+
+  const sessStartNum = (sessPage - 1) * sessPageSize + 1;
+  const sessEndNum = Math.min(sessPage * sessPageSize, sessions.length);
 
   return (
     <div className="space-y-6">
@@ -581,46 +659,118 @@ export default function PresensiPage() {
                 ) : sessions.length === 0 ? (
                   <p className="text-sm text-slate-500">Belum ada sesi.</p>
                 ) : (
-                  <div className="rounded-md border overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Tanggal</TableHead>
-                          <TableHead>Waktu</TableHead>
-                          <TableHead>Deskripsi</TableHead>
-                          <TableHead className="text-right">Hadir</TableHead>
-                          <TableHead className="text-right">Izin</TableHead>
-                          <TableHead className="text-right">Sakit</TableHead>
-                          <TableHead className="text-right">DL</TableHead>
-                          <TableHead className="text-right">TK</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead className="text-right">Aksi</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {sessions.map((s) => (
-                          <TableRow key={s.id}>
-                            <TableCell className="whitespace-nowrap">{s.tanggal}</TableCell>
-                            <TableCell className="whitespace-nowrap">
-                              {fmtTime(s.jam_mulai)} - {fmtTime(s.jam_akhir)}
-                            </TableCell>
-                            <TableCell className="whitespace-nowrap">{s.deskripsi || '-'}</TableCell>
-                            <TableCell className="text-right">{s.counts.HADIR}</TableCell>
-                            <TableCell className="text-right">{s.counts.IZIN}</TableCell>
-                            <TableCell className="text-right">{s.counts.SAKIT}</TableCell>
-                            <TableCell className="text-right">{s.counts.DL}</TableCell>
-                            <TableCell className="text-right">{s.counts.TK}</TableCell>
-                            <TableCell className="text-right">{s.total}</TableCell>
-                            <TableCell className="text-right">
-                              <Button size="sm" variant="outline" onClick={() => useFromHistory(s.id)}>
-                                Gunakan
-                              </Button>
-                            </TableCell>
+                  <>
+                    <div className="rounded-md border overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Tanggal</TableHead>
+                            <TableHead>Waktu</TableHead>
+                            <TableHead>Deskripsi</TableHead>
+                            <TableHead className="text-right">Hadir</TableHead>
+                            <TableHead className="text-right">Izin</TableHead>
+                            <TableHead className="text-right">Sakit</TableHead>
+                            <TableHead className="text-right">DL</TableHead>
+                            <TableHead className="text-right">TK</TableHead>
+                            <TableHead className="text-right">Total</TableHead>
+                            <TableHead className="text-right">Aksi</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
+                        </TableHeader>
+                        <TableBody>
+                          {sessionsPaginated.map((s) => (
+                            <TableRow key={s.id}>
+                              <TableCell className="whitespace-nowrap">{s.tanggal}</TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {fmtTime(s.jam_mulai)} - {fmtTime(s.jam_akhir)}
+                              </TableCell>
+                              <TableCell className="whitespace-nowrap">{s.deskripsi || '-'}</TableCell>
+                              <TableCell className="text-right">{s.counts.HADIR}</TableCell>
+                              <TableCell className="text-right">{s.counts.IZIN}</TableCell>
+                              <TableCell className="text-right">{s.counts.SAKIT}</TableCell>
+                              <TableCell className="text-right">{s.counts.DL}</TableCell>
+                              <TableCell className="text-right">{s.counts.TK}</TableCell>
+                              <TableCell className="text-right">{s.total}</TableCell>
+                              <TableCell className="text-right">
+                                <Button size="sm" variant="outline" onClick={() => useFromHistory(s.id)}>
+                                  Gunakan
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+
+                    {/* Pagination controls untuk Riwayat */}
+                    <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="text-xs text-slate-500">
+                        Total: {sessions.length} sesi
+                        {sessions.length > 0 && (
+                          <>
+                            {' · '}Menampilkan {sessStartNum}
+                            {'–'}{sessEndNum}
+                            {' '}dari {sessions.length}
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-600">Rows per page</span>
+                          {/* gunakan native select agar tidak menambah import baru */}
+                          <select
+                            className="h-8 rounded-md border px-2 text-sm"
+                            value={String(sessPageSize)}
+                            onChange={(e) => setSessPageSize(Number(e.target.value))}
+                          >
+                            {[5, 10, 20, 50].map((n) => (
+                              <option key={n} value={n}>{n}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSessPage(1)}
+                            disabled={sessPage === 1 || loadingSessions || sessions.length === 0}
+                          >
+                            <ChevronsLeft className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSessPage((p) => Math.max(1, p - 1))}
+                            disabled={sessPage === 1 || loadingSessions || sessions.length === 0}
+                          >
+                            <ChevronLeft className="h-4 w-4" />
+                          </Button>
+
+                          <span className="mx-2 text-xs text-slate-600">
+                            Page {sessPage} / {sessTotalPages}
+                          </span>
+
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSessPage((p) => Math.min(sessTotalPages, p + 1))}
+                            disabled={sessPage === sessTotalPages || loadingSessions || sessions.length === 0}
+                          >
+                            <ChevronRight className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSessPage(sessTotalPages)}
+                            disabled={sessPage === sessTotalPages || loadingSessions || sessions.length === 0}
+                          >
+                            <ChevronsRight className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  </>
                 )}
                 <p className="text-xs text-slate-500 mt-2">
                   Klik <b>Gunakan</b> untuk memuat status dari sesi terpilih, lalu kamu bisa ubah detailnya di langkah berikutnya.
@@ -679,7 +829,7 @@ export default function PresensiPage() {
         </Card>
       )}
 
-      {/* STEP 3: Unit & Pegawai (tanpa tabs, aksi per baris) */}
+      {/* STEP 3: Unit & Pegawai */}
       {step === 3 && (
         <>
           <Card>
@@ -784,8 +934,7 @@ export default function PresensiPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Nama</TableHead>
-                      <TableHead>NIP</TableHead>
-                      <TableHead>Jabatan</TableHead>
+                      <TableHead>Unit Kerja</TableHead>
                       <TableHead className="text-right">Status</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -811,10 +960,8 @@ export default function PresensiPage() {
                     ) : (
                       sortedRows.map((p) => (
                         <TableRow key={p.id}>
-                          <TableCell className="whitespace-nowrap">{p.nama}</TableCell>
-                          <TableCell>{p.nip}</TableCell>
-                          <TableCell className="whitespace-nowrap">{p.jabatan}</TableCell>
-                          <TableCell className="whitespace-nowrap">{unitMap.get(p.unit_id) || p.units?.name || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap">{p.nama} <br /> {p.nip}</TableCell>
+                          <TableCell className="whitespace-nowrap">{unitMapLocal.get(p.unit_id) || p.units?.name || '-'}</TableCell>
                           <TableCell className="text-right">
                             <RowStatusControl
                               value={statusByEmp[p.id]}
@@ -841,17 +988,35 @@ export default function PresensiPage() {
           </Card>
 
           {errMsg && <div className="text-sm text-red-600">{errMsg}</div>}
+
           <div className="flex items-center justify-between">
             <Button variant="outline" onClick={() => setStep(2)}>
               Kembali
             </Button>
-            <Button
-              className="bg-[#003A70] hover:opacity-95"
-              onClick={handleSave}
-              disabled={saving || Object.values(statusByEmp).every((v) => !v)}
-            >
-              {saving ? 'Menyimpan...' : 'Simpan Presensi'}
-            </Button>
+
+            <div className="flex items-center gap-2">
+              {quickSavedAt && (
+                <span className="text-xs text-green-600">
+                  Tersimpan sementara ({new Date(quickSavedAt).toLocaleTimeString()})
+                </span>
+              )}
+
+              <Button
+                variant="outline"
+                onClick={handleQuickSave}
+                disabled={savingQuick || Object.values(statusByEmp).every((v) => !v)}
+              >
+                {savingQuick ? 'Menyimpan…' : 'Simpen Presensi'}
+              </Button>
+
+              <Button
+                className="bg-[#003A70] hover:opacity-95"
+                onClick={handleSave}
+                disabled={saving || Object.values(statusByEmp).every((v) => !v)}
+              >
+                {saving ? 'Menyimpan...' : 'Selesai'}
+              </Button>
+            </div>
           </div>
         </>
       )}

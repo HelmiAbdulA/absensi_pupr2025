@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/select';
 import {
   Download, Plus, UserPlus, FileDown, Filter, RefreshCw,
+  ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight
 } from 'lucide-react';
 import {
   PieChart as RePieChart,
@@ -112,6 +113,10 @@ export default function DashboardPage() {
   // trend
   const [trendData, setTrendData] = useState<Array<{ day: string; hadir: number }>>([]);
 
+  // ========= NEW: Pagination state for "Presensi Terbaru" =========
+  const [pageSize, setPageSize] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(1); // 1-based
+
   // load all widgets concurrently
   useEffect(() => {
     let alive = true;
@@ -153,7 +158,7 @@ export default function DashboardPage() {
           .order('created_at', { ascending: false })
           .limit(100);
 
-        // 5) trend hadir 7 hari: ambil sessions range + entries HADIR lalu agregasi client side
+        // 5) trend hadir 7 hari
         const sRangeQ = supabase
           .from('attendance_sessions')
           .select('id,tanggal')
@@ -192,11 +197,9 @@ export default function DashboardPage() {
 
           if (entHadirQ.error) throw entHadirQ.error;
 
-          // map sessionId -> tanggal
           const sid2date = new Map<string, string>();
           (sRange || []).forEach((s) => sid2date.set(s.id, s.tanggal));
 
-          // tally per tanggal
           const tally = new Map<string, number>();
           (entHadirQ.data || []).forEach((r) => {
             const tgl = sid2date.get(r.session_id);
@@ -204,11 +207,8 @@ export default function DashboardPage() {
             tally.set(tgl, (tally.get(tgl) || 0) + 1);
           });
 
-          // build 7 slots from from7..today
           const labels: string[] = [];
-          for (let i = 6; i >= 0; i--) {
-            labels.push(ymdNDaysAgo(i));
-          }
+          for (let i = 6; i >= 0; i--) labels.push(ymdNDaysAgo(i));
           trend = labels.map((tgl) => {
             const d = new Date(tgl);
             const label = d.toLocaleDateString('id-ID', { weekday: 'short' });
@@ -227,7 +227,7 @@ export default function DashboardPage() {
     return () => { alive = false; };
   }, []);
 
-  // summary hari ini dari recentEntries yang tanggal == today
+  // summary hari ini
   const todaySummary = useMemo(() => {
     const YMD = todayYMD();
     const rows = recentEntries.filter(r => r.session?.tanggal === YMD);
@@ -255,6 +255,27 @@ export default function DashboardPage() {
       return true;
     });
   }, [recentEntries, unitFilter, statusFilter, q]);
+
+  // ========= NEW: Pagination derived =========
+  const totalPages = useMemo(
+    () => Math.max(1, Math.ceil(filtered.length / pageSize)),
+    [filtered.length, pageSize]
+  );
+
+  useEffect(() => {
+    // reset ke page 1 saat filter/search/pageSize berubah
+    setCurrentPage(1);
+  }, [unitFilter, statusFilter, q, pageSize]);
+
+  useEffect(() => {
+    // clamp jika currentPage > totalPages
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
+  const paginated = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filtered.slice(start, start + pageSize);
+  }, [filtered, currentPage, pageSize]);
 
   // pie data from today summary
   const pieData = useMemo(
@@ -438,7 +459,15 @@ export default function DashboardPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((r) => (
+                {loading && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-sm text-slate-500 py-10">
+                      Memuat data…
+                    </TableCell>
+                  </TableRow>
+                )}
+
+                {!loading && paginated.map((r) => (
                   <TableRow key={r.id}>
                     <TableCell className="whitespace-nowrap">{r.session?.tanggal ?? ''}</TableCell>
                     <TableCell>{fmtTimeHHmm(r.session?.jam_mulai)}</TableCell>
@@ -454,27 +483,91 @@ export default function DashboardPage() {
                     </TableCell>
                   </TableRow>
                 ))}
-                {filtered.length === 0 && !loading && (
+
+                {!loading && paginated.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-sm text-slate-500 py-10">
                       Tidak ada data sesuai filter.
                     </TableCell>
                   </TableRow>
                 )}
-                {loading && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="text-center text-sm text-slate-500 py-10">
-                      Memuat data…
-                    </TableCell>
-                  </TableRow>
-                )}
               </TableBody>
             </Table>
+          </div>
+
+          {/* ========= NEW: Pagination controls ========= */}
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-slate-500">
+              Total: {filtered.length} entri
+              {filtered.length > 0 && (
+                <>
+                  {' · '}Menampilkan {((currentPage - 1) * pageSize) + 1}
+                  {'–'}{Math.min(currentPage * pageSize, filtered.length)}
+                  {' '}dari {filtered.length}
+                </>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-600">Rows per page</span>
+                <Select value={String(pageSize)} onValueChange={(v) => setPageSize(Number(v))}>
+                  <SelectTrigger className="h-8 w-20">
+                    <SelectValue placeholder={String(pageSize)} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[5, 10, 20, 50, 100].map(n => (
+                      <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(1)}
+                  disabled={currentPage === 1 || loading || filtered.length === 0}
+                >
+                  <ChevronsLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  disabled={currentPage === 1 || loading || filtered.length === 0}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+
+                <span className="mx-2 text-xs text-slate-600">
+                  Page {currentPage} / {totalPages}
+                </span>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages || loading || filtered.length === 0}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={currentPage === totalPages || loading || filtered.length === 0}
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
           </div>
         </CardContent>
       </Card>
 
-      {/* LOG AKTIVITAS TERAKHIR (opsional: arahkan ke /log untuk detail) */}
+      {/* LOG AKTIVITAS TERAKHIR */}
       <Card>
         <CardHeader className="pb-2"><CardTitle className="text-base">Log Aktivitas</CardTitle></CardHeader>
         <CardContent>

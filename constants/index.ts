@@ -23,7 +23,7 @@ export const NAV_ITEMS = [
   { title: "Log Aktivitas", href: "/log", icon: History },
   { title: "Pengaturan", href: "/settings", icon: Settings },
 ];
-
+// variable
 export const UNITS = [
   'Sekretariat',
   'Bid. Bina Marga',
