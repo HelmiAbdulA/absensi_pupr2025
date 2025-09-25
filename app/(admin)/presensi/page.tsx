@@ -24,6 +24,11 @@ import {
   ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight,
 } from 'lucide-react';
 
+// === Tambahan untuk popup/notifikasi ===
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog';
+
 /** =========================================================
  *  TYPES (ringan, cukup untuk komponen ini)
  *  =======================================================*/
@@ -214,7 +219,7 @@ export default function PresensiPage() {
   const [sessions, setSessions] = useState<SessionWithCounts[]>([]);
   const [loadingSessions, setLoadingSessions] = useState<boolean>(false);
 
-  /** ---------- NEW: Pagination state untuk tabel Riwayat ---------- */
+  /** ---------- Pagination Riwayat ---------- */
   const [sessPageSize, setSessPageSize] = useState<number>(10);
   const [sessPage, setSessPage] = useState<number>(1); // 1-based
 
@@ -222,7 +227,7 @@ export default function PresensiPage() {
   const [unitChecked, setUnitChecked] = useState<Record<string, boolean>>({});
   const [statusByEmp, setStatusByEmp] = useState<Record<string, Status | undefined>>({});
 
-  /** ---------- Sorting ---------- */
+  /** ---------- Sorting (existing) ---------- */
   const [sortBy, setSortBy] = useState<SortBy>('nama');
   const [sortNamaDir, setSortNamaDir] = useState<Dir>('asc');
   const [sortJabatanDir, setSortJabatanDir] = useState<Dir>('asc');
@@ -231,9 +236,13 @@ export default function PresensiPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<{ sesiId: string; tally: Record<Status, number> } | null>(null);
 
-  /** ---------- NEW sebelumnya: Quick save (tetap pertahankan) ---------- */
+  /** ---------- Quick save (existing) ---------- */
   const [savingQuick, setSavingQuick] = useState(false);
   const [quickSavedAt, setQuickSavedAt] = useState<string | null>(null);
+
+  /** ---------- NEW: Dialog sukses ---------- */
+  const [openQuickSuccess, setOpenQuickSuccess] = useState(false);
+  const [openDoneSuccess, setOpenDoneSuccess] = useState(false);
 
   /** ---------- Load master (units, employees) ---------- */
   useEffect(() => {
@@ -278,7 +287,6 @@ export default function PresensiPage() {
       setLoadingSessions(true);
       setErrMsg(null);
 
-      // 1) Ambil semua sesi (batasi 100 biar enteng)
       const sQ = await supabase
         .from('attendance_sessions')
         .select('id,tanggal,jam_mulai,jam_akhir,deskripsi,created_at')
@@ -302,7 +310,6 @@ export default function PresensiPage() {
         return;
       }
 
-      // 2) Ambil semua entries untuk sesi-sesi ini, lalu agregasi client-side (1 query)
       const ids = sessionsRaw.map((s) => s.id);
       const eQ = await supabase
         .from('attendance_entries')
@@ -477,6 +484,9 @@ export default function PresensiPage() {
 
       setSaved({ sesiId: sessionId, tally });
       setStep(4);
+
+      // === NEW: popup sukses selesai ===
+      setOpenDoneSuccess(true);
     } catch (e: any) {
       setErrMsg(e?.message || 'Terjadi kesalahan saat menyimpan.');
     } finally {
@@ -537,6 +547,9 @@ export default function PresensiPage() {
       setSaved({ sesiId: sessionId, tally });
 
       setQuickSavedAt(new Date().toISOString());
+
+      // === NEW: popup sukses quick save ===
+      setOpenQuickSuccess(true);
     } catch (e: any) {
       setErrMsg(e?.message || 'Terjadi kesalahan saat menyimpan.');
     } finally {
@@ -556,6 +569,7 @@ export default function PresensiPage() {
   const unitMapLocal = unitMap;
   const unitsSelectedCount = unitsSelected.length;
 
+  // Urutan existing (Nama/Jabatan)
   const sortedRows = useMemo(() => {
     let rows = baseRows.slice();
     rows = rows.sort((a, b) => {
@@ -572,19 +586,40 @@ export default function PresensiPage() {
     return rows;
   }, [baseRows, sortBy, sortNamaDir, sortJabatanDir]);
 
-  /** ---------- NEW: Pagination derived untuk Riwayat ---------- */
+  // === NEW: Urutkan BERDASARKAN ABJAD Unit Kerja untuk tabel Ringkasan Sementara ===
+  const sortedRowsByUnit = useMemo(() => {
+    const rows = sortedRows.slice();
+    rows.sort((a, b) => {
+      const ua = (unitMapLocal.get(a.unit_id) || a.units?.name || '').toString();
+      const ub = (unitMapLocal.get(b.unit_id) || b.units?.name || '').toString();
+      const unitCmp = ua.localeCompare(ub);
+      if (unitCmp !== 0) return unitCmp;
+
+      // jika unit sama, pakai fallback sesuai pilihan sort existing (tidak mengubah logic lama)
+      if (sortBy === 'nama') {
+        const cmp = a.nama.localeCompare(b.nama);
+        if (cmp !== 0) return sortNamaDir === 'asc' ? cmp : -cmp;
+        return a.jabatan.localeCompare(b.jabatan);
+      } else {
+        const cmp = a.jabatan.localeCompare(b.jabatan);
+        if (cmp !== 0) return sortJabatanDir === 'asc' ? cmp : -cmp;
+        return a.nama.localeCompare(b.nama);
+      }
+    });
+    return rows;
+  }, [sortedRows, unitMapLocal, sortBy, sortNamaDir, sortJabatanDir]);
+
+  /** ---------- Pagination Riwayat ---------- */
   const sessTotalPages = useMemo(
     () => Math.max(1, Math.ceil(sessions.length / sessPageSize)),
     [sessions.length, sessPageSize]
   );
 
   useEffect(() => {
-    // reset ke halaman 1 saat ukuran halaman berubah / data riwayat berubah
     setSessPage(1);
   }, [sessPageSize, sessions]);
 
   useEffect(() => {
-    // clamp jika halaman > total halaman (misal data riwayat jadi lebih sedikit)
     if (sessPage > sessTotalPages) setSessPage(sessTotalPages);
   }, [sessPage, sessTotalPages]);
 
@@ -717,7 +752,6 @@ export default function PresensiPage() {
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
                           <span className="text-xs text-slate-600">Rows per page</span>
-                          {/* gunakan native select agar tidak menambah import baru */}
                           <select
                             className="h-8 rounded-md border px-2 text-sm"
                             value={String(sessPageSize)}
@@ -886,6 +920,19 @@ export default function PresensiPage() {
                 onClick={() => {
                   const next = { ...statusByEmp };
                   baseRows.forEach((p) => {
+                    next[p.id] = 'TK';
+                  });
+                  setStatusByEmp(next);
+                }}
+              >
+                Set semua → Tidak Hadir
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  const next = { ...statusByEmp };
+                  baseRows.forEach((p) => {
                     delete next[p.id];
                   });
                   setStatusByEmp(next);
@@ -951,14 +998,14 @@ export default function PresensiPage() {
                           Memuat pegawai…
                         </TableCell>
                       </TableRow>
-                    ) : sortedRows.length === 0 ? (
+                    ) : sortedRowsByUnit.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={5} className="text-center text-sm text-slate-500 py-8">
                           Tidak ada pegawai pada unit terpilih.
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sortedRows.map((p) => (
+                      sortedRowsByUnit.map((p) => (
                         <TableRow key={p.id}>
                           <TableCell className="whitespace-nowrap">{p.nama} <br /> {p.nip}</TableCell>
                           <TableCell className="whitespace-nowrap">{unitMapLocal.get(p.unit_id) || p.units?.name || '-'}</TableCell>
@@ -982,7 +1029,7 @@ export default function PresensiPage() {
                 </Table>
               </div>
               <div className="text-xs text-slate-500">
-                Tip: klik “Set semua → Hadir”, lalu ubah baris yang tidak hadir dengan dropdown.
+                Tip: klik “Set semua → Tidak Hadir”, lalu ubah baris yang hadir.
               </div>
             </CardContent>
           </Card>
@@ -1072,6 +1119,50 @@ export default function PresensiPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* ---------------------- */}
+      {/* DIALOG SUKSES (Quick) */}
+      {/* ---------------------- */}
+      <Dialog open={openQuickSuccess} onOpenChange={setOpenQuickSuccess}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Berhasil</DialogTitle>
+            <DialogDescription>
+              Presensi berhasil <b>disimpan sementara</b>. Kamu tetap berada di langkah ini.
+            </DialogDescription>
+          </DialogHeader>
+          {saved?.sesiId && (
+            <div className="text-sm">
+              <div className="mb-1">ID Sesi: <span className="font-medium">{saved.sesiId}</span></div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setOpenQuickSuccess(false)}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ---------------------- */}
+      {/* DIALOG SUKSES (Selesai) */}
+      {/* ---------------------- */}
+      <Dialog open={openDoneSuccess} onOpenChange={setOpenDoneSuccess}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Berhasil</DialogTitle>
+            <DialogDescription>
+              Presensi berhasil <b>disimpan</b>. Ringkasan tersaji di langkah berikutnya.
+            </DialogDescription>
+          </DialogHeader>
+          {saved?.sesiId && (
+            <div className="text-sm">
+              <div className="mb-1">ID Sesi: <span className="font-medium">{saved.sesiId}</span></div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setOpenDoneSuccess(false)}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
