@@ -13,7 +13,7 @@ import {
   PieChart as RePieChart, Pie, Cell,
   BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import * as XLSX from 'xlsx' // (masih diimport jika sewaktu-waktu dipakai)
+import * as XLSX from 'xlsx' // (disimpan bila nanti dipakai)
 import { supabase } from '@/lib/supabaseClient'
 import type { StatusKehadiran } from '@/types'
 
@@ -33,6 +33,9 @@ type EntryRow = {
 
 const COLORS = ['#0E5AAE', '#F4C542', '#10B981', '#6366F1', '#EF4444'] // HADIR, IZIN, SAKIT, DL, TK
 
+// util kecil
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
+
 // ====================================================
 export default function LaporanPage() {
   // periode & filter
@@ -41,6 +44,7 @@ export default function LaporanPage() {
   const [dateTo, setDateTo] = useState('')
   const [unit, setUnit] = useState('Semua Unit')
   const [q, setQ] = useState('')
+  const [qDebounced, setQDebounced] = useState('')
 
   // data
   const [rows, setRows] = useState<EntryRow[]>([])
@@ -63,13 +67,27 @@ export default function LaporanPage() {
   }
   const { from, to } = computeDateRange()
 
+  // =============== debounce input pencarian ===============
+  useEffect(() => {
+    const t = setTimeout(() => setQDebounced(q.trim()), 300)
+    return () => clearTimeout(t)
+  }, [q])
+
   // =============== load units (dropdown) ===============
   useEffect(() => {
     let alive = true
-    supabase.from('units').select('name').order('name', { ascending: true }).then(({ data }) => {
-      if (!alive) return
-      setUnits((data || []).map(d => d.name))
-    })
+    supabase
+      .from('units')
+      .select('name')
+      .order('name', { ascending: true })
+      .then(({ data, error }) => {
+        if (!alive) return
+        if (error) {
+          setErr(error.message)
+          return
+        }
+        setUnits((data || []).map(d => d.name))
+      })
     return () => { alive = false }
   }, [])
 
@@ -82,16 +100,17 @@ export default function LaporanPage() {
     async function fetchData() {
       setLoading(true); setErr(null)
 
+      // PENTING: gunakan nama tabel asli pada filter & pakai !inner agar filter efektif
       const { data, error } = await supabase
         .from('attendance_entries')
         .select(`
           id,
           status,
-          session:attendance_sessions ( tanggal, jam_mulai, deskripsi ),
-          employee:employees ( nama, nip, unit:unit_id ( name ) )
+          session:attendance_sessions!inner ( tanggal, jam_mulai, deskripsi ),
+          employee:employees!inner ( nama, nip, unit:unit_id ( name ) )
         `)
-        .gte('session.tanggal', from)
-        .lte('session.tanggal', to)
+        .gte('attendance_sessions.tanggal', from)
+        .lte('attendance_sessions.tanggal', to)
         .order('id', { ascending: false })
 
       if (!alive) return
@@ -127,28 +146,30 @@ export default function LaporanPage() {
 
   // handler reset filter
   const handleResetFilter = () => {
-    setRange('hari')
+    setRange('custom')
     setDateFrom('')
     setDateTo('')
     setUnit('Semua Unit')
     setQ('')
+    setQDebounced('')
     setShowData(false)
     setHasTriggeredFetch(false)
     setRows([])
     setErr(null)
+    setPage(1)
   }
 
   // =============== filter client-side tambahan ===============
   const filtered = useMemo(() => {
     return rows.filter((r) => {
       if (unit !== 'Semua Unit' && r.unit !== unit) return false
-      if (q) {
+      if (qDebounced) {
         const text = `${r.nama} ${r.nip} ${r.unit} ${r.deskripsi}`.toLowerCase()
-        if (!text.includes(q.toLowerCase())) return false
+        if (!text.includes(qDebounced.toLowerCase())) return false
       }
       return true
     })
-  }, [rows, unit, q])
+  }, [rows, unit, qDebounced])
 
   // =============== agregasi ===============
   const dist = useMemo(() => {
@@ -179,7 +200,7 @@ export default function LaporanPage() {
       if (!map[r.unit]) map[r.unit] = { unit: r.unit, HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 }
       map[r.unit][r.status] += 1
     })
-    return Object.values(map)
+    return Object.values(map).sort((a, b) => a.unit.localeCompare(b.unit))
   }, [filtered])
 
   const byPerson = useMemo(() => {
@@ -200,6 +221,18 @@ export default function LaporanPage() {
     }))
     return rows.sort((a,b) => b.persenHadir - a.persenHadir)
   }, [filtered])
+
+  // =============== pagination untuk tabel per pegawai ===============
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const totalPages = useMemo(() => Math.max(1, Math.ceil(byPerson.length / pageSize)), [byPerson.length, pageSize])
+  useEffect(() => {
+    setPage(1) // reset halaman saat filter berubah atau pageSize berubah
+  }, [unit, qDebounced, pageSize, from, to, showData])
+
+  const pageStart = (page - 1) * pageSize
+  const pageEnd = Math.min(page * pageSize, byPerson.length)
+  const byPersonPage = useMemo(() => byPerson.slice(pageStart, pageEnd), [byPerson, pageStart, pageEnd])
 
   // =============== export CSV ===============
   function exportCSVPersons() {
@@ -248,6 +281,13 @@ export default function LaporanPage() {
           </div>
         )}
       </div>
+
+      {/* Error state */}
+      {err && (
+        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">
+          Terjadi kesalahan saat memuat data: <span className="font-medium">{err}</span>
+        </div>
+      )}
 
       {/* Kartu Filter */}
       <Card>
@@ -365,7 +405,7 @@ export default function LaporanPage() {
             <div className="text-sm text-blue-700">
               <span className="font-medium">Periode:</span> {from} s/d {to}
               {unit !== 'Semua Unit' && <span className="ml-2">• <span className="font-medium">Unit:</span> {unit}</span>}
-              {q && <span className="ml-2">• <span className="font-medium">Filter:</span> “{q}”</span>}
+              {qDebounced && <span className="ml-2">• <span className="font-medium">Filter:</span> “{qDebounced}”</span>}
             </div>
             <div className="text-sm text-blue-600">Total: {filtered.length} entri</div>
           </div>
@@ -426,9 +466,63 @@ export default function LaporanPage() {
               </div>
             </CardHeader>
             <CardContent>
+              {/* Controls: page size & info */}
+              <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs text-slate-600">
+                <div>
+                  {byPerson.length > 0 ? (
+                    <>Menampilkan <b>{pageStart + 1}</b>–<b>{pageEnd}</b> dari <b>{byPerson.length}</b> pegawai</>
+                  ) : 'Tidak ada data.'}
+                </div>
+                <div className="flex items-center gap-2">
+                  <span>Rows per page</span>
+                  <select
+                    className="h-8 rounded-md border px-2 text-sm"
+                    value={String(pageSize)}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                  >
+                    {[10, 25, 50].map(n => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <div className="ml-3 flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(1)}
+                      disabled={page === 1}
+                    >
+                      {'<<'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(p => clamp(p - 1, 1, totalPages))}
+                      disabled={page === 1}
+                    >
+                      {'<'}
+                    </Button>
+                    <span className="px-1">Hal {page} / {totalPages}</span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(p => clamp(p + 1, 1, totalPages))}
+                      disabled={page === totalPages}
+                    >
+                      {'>'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage(totalPages)}
+                      disabled={page === totalPages}
+                    >
+                      {'>>'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
               <div className="rounded-md border overflow-x-auto">
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="sticky top-0 bg-white">
                     <TableRow>
                       <TableHead>Nama</TableHead>
                       <TableHead>NIP</TableHead>
@@ -452,12 +546,12 @@ export default function LaporanPage() {
                           </div>
                         </TableCell>
                       </TableRow>
-                    ) : byPerson.length === 0 ? (
+                    ) : byPersonPage.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={10} className="text-center text-sm text-slate-500 py-10">Tidak ada data pada periode ini.</TableCell>
                       </TableRow>
                     ) : (
-                      byPerson.map((p) => (
+                      byPersonPage.map((p) => (
                         <TableRow key={p.nip}>
                           <TableCell className="whitespace-nowrap">{p.nama}</TableCell>
                           <TableCell>{p.nip}</TableCell>
