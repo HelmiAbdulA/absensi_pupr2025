@@ -8,6 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import ExcelJS from "exceljs";
 import {
   Table, TableHeader, TableRow, TableHead, TableCell, TableBody,
 } from '@/components/ui/table';
@@ -267,6 +268,97 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   }
 
+  async function exportExcel() {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "PUPR Attendance";
+  wb.created = new Date();
+
+  const ws = wb.addWorksheet("Presensi", {
+    views: [{ state: "frozen", ySplit: 1 }], // freeze header
+    properties: { defaultRowHeight: 18 },
+  });
+
+  // Kolom + lebar
+  ws.columns = [
+    { header: "Tanggal", key: "tanggal", width: 12 },
+    { header: "Jam", key: "jam", width: 8 },
+    { header: "Unit", key: "unit", width: 28 },
+    { header: "Nama", key: "nama", width: 28 },
+    { header: "NIP", key: "nip", width: 20 },
+    { header: "Status", key: "status", width: 10 },
+  ];
+
+  // Styling header
+  const header = ws.getRow(1);
+  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  header.alignment = { vertical: "middle", horizontal: "center" };
+  header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF003A70" } }; // biru gelap
+  header.height = 24;
+
+  // Data
+  const rows = filtered.map((r) => ({
+    tanggal: r.session?.tanggal ?? "",
+    jam: fmtTimeHHmm(r.session?.jam_mulai),
+    unit: r.employee?.unit?.name ?? "-",
+    nama: r.employee?.nama ?? "-",
+    nip: r.employee?.nip ?? "-",
+    status: r.status,
+  }));
+
+  // Peta warna status
+  const statusFill: Record<string, string> = {
+    HADIR: "FF1E88E5", // hijau
+    IZIN: "FFF9A825",  // biru
+    SAKIT: "FFF9A825", // kuning
+    DL: "FF6A1B9A",    // ungu
+    TK: "FFC62828",    // merah
+  };
+
+  // Tambah baris + styling baris
+  rows.forEach((data, idx) => {
+    const row = ws.addRow(data);
+
+    // zebra striping untuk keterbacaan
+    if (idx % 2 === 0) {
+      row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F7FB" } };
+    }
+
+    // border tipis + vertical align
+    row.eachCell({ includeEmpty: true }, (cell) => {
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFE2E8F0" } },
+        left: { style: "thin", color: { argb: "FFE2E8F0" } },
+        bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+        right: { style: "thin", color: { argb: "FFE2E8F0" } },
+      };
+      cell.alignment = { vertical: "middle" };
+    });
+
+    // badge warna untuk kolom Status
+    const c = row.getCell(6);
+    const color = statusFill[data.status] || "FF9CA3AF"; // default abu
+    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
+    c.font = { bold: true, color: { argb: color === "FFF9A825" ? "FF000000" : "FFFFFFFF" } }; // teks hitam untuk kuning
+    c.alignment = { horizontal: "center" };
+    row.height = 20;
+  });
+
+  // Autofilter di header
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 6 } };
+
+  // Simpan file
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `presensi_terbaru_${todayYMD()}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
   const sesiHariIniCount = sessionsToday.length;
   const sesiHariIniList = sessionsToday.map(s => fmtTimeHHmm(s.jam_mulai)).filter(Boolean).join(', ');
 
@@ -306,19 +398,12 @@ export default function DashboardPage() {
 
       {err && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{err}</div>}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="pb-2"><CardTitle className="text-base">Total Pegawai Aktif</CardTitle></CardHeader>
           <CardContent>
             <p className="text-3xl font-semibold text-slate-900">{totalEmployees}</p>
             <p className="text-xs text-slate-500 mt-1">Terdata pada sistem</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-base">Sesi Hari Ini</CardTitle></CardHeader>
-          <CardContent>
-            <p className="text-3xl font-semibold text-slate-900">{sesiHariIniCount}</p>
-            <p className="text-xs text-slate-500 mt-1"></p>
           </CardContent>
         </Card>
         <Card>
@@ -372,6 +457,9 @@ export default function DashboardPage() {
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={exportCSV}>
               <Download className="h-4 w-4 mr-1" /> Unduh CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportExcel}>
+              <Download className="h-4 w-4 mr-1" /> Unduh Excel
             </Button>
           </div>
         </CardHeader>

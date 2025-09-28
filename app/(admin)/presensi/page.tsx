@@ -1,42 +1,62 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /* eslint-disable @typescript-eslint/no-explicit-any */
-'use client';
+"use client";
 
-import { useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabaseClient';
+import { useEffect, useMemo, useState } from "react";
+import { supabase } from "@/lib/supabaseClient";
 
-import { cn } from '@/lib/utils';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 
 import {
-  CalendarDays, ClipboardList, History as HistoryIcon, Users,
-  SortAsc, SortDesc, CheckCircle2, RefreshCcw, PlusCircle,
-  ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight,
-} from 'lucide-react';
+  CalendarDays,
+  ClipboardList,
+  History as HistoryIcon,
+  Users,
+  SortAsc,
+  SortDesc,
+  CheckCircle2,
+  RefreshCcw,
+  PlusCircle,
+  ChevronsLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsRight,
+} from "lucide-react";
 
 // === Tambahan untuk popup/notifikasi ===
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
-} from '@/components/ui/dialog';
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 /** =========================================================
  *  TYPES (ringan, cukup untuk komponen ini)
  *  =======================================================*/
 type UUID = string;
 
-type Status = 'HADIR' | 'IZIN' | 'SAKIT' | 'DL' | 'TK';
-const NON_HADIR: Status[] = ['IZIN', 'SAKIT', 'DL', 'TK'];
-const ALL_STATUS: Status[] = ['HADIR', 'IZIN', 'SAKIT', 'DL', 'TK'];
+type Status = "HADIR" | "IZIN" | "SAKIT" | "DL" | "TK";
+const NON_HADIR: Status[] = ["IZIN", "SAKIT", "DL", "TK"];
+const ALL_STATUS: Status[] = ["HADIR", "IZIN", "SAKIT", "DL", "TK"];
 
 type Unit = {
   id: UUID;
@@ -49,17 +69,17 @@ type Employee = {
   nip: string;
   jabatan: string;
   unit_id: UUID;
-  status_pg: 'ASN' | 'NON_ASN';
+  status_pg: "ASN" | "NON_ASN";
   active: boolean;
 };
 
 type SessionLite = {
   id: UUID;
-  tanggal: string;       // date (YYYY-MM-DD)
-  jam_mulai: string;     // HH:mm:ss
-  jam_akhir: string;     // HH:mm:ss
+  tanggal: string; // date (YYYY-MM-DD)
+  jam_mulai: string; // HH:mm:ss
+  jam_akhir: string; // HH:mm:ss
   deskripsi: string | null;
-  created_at: string;    // ISO
+  created_at: string; // ISO
 };
 
 type SessionWithCounts = SessionLite & {
@@ -79,7 +99,7 @@ type AttendanceRow = {
  *  =======================================================*/
 function fmtTime(t: string) {
   // terima "08:00" atau "08:00:00" → balikin "08:00"
-  return (t || '').slice(0, 5);
+  return (t || "").slice(0, 5);
 }
 
 /** =========================================================
@@ -89,10 +109,10 @@ function RowStatusControl({
   value,
   onChange,
 }: {
-  value?: Status;                     // undefined = UNSET
-  onChange: (s?: Status) => void;    // undefined untuk UNSET
+  value?: Status; // undefined = UNSET
+  onChange: (s?: Status) => void; // undefined untuk UNSET
 }) {
-  const isHadir = value === 'HADIR';
+  const isHadir = value === "HADIR";
   const isUnset = value === undefined;
   const isTidakHadir = !isHadir && !isUnset;
 
@@ -101,17 +121,17 @@ function RowStatusControl({
       <div className="inline-flex rounded-md border p-0.5">
         <Button
           size="sm"
-          variant={isHadir ? 'default' : 'ghost'}
-          className={isHadir ? 'bg-[#28A745]' : ''}
-          onClick={() => onChange('HADIR')}
+          variant={isHadir ? "default" : "ghost"}
+          className={isHadir ? "bg-[#28A745]" : ""}
+          onClick={() => onChange("HADIR")}
         >
           Hadir
         </Button>
         <Button
           size="sm"
-          variant={isTidakHadir ? 'default' : 'ghost'}
-          className={isTidakHadir ? 'bg-[#FFC107]' : ''}
-          onClick={() => onChange('IZIN')} // default ke IZIN saat toggle ke tidak hadir
+          variant={isTidakHadir ? "default" : "ghost"}
+          className={isTidakHadir ? "bg-[#FFC107]" : ""}
+          onClick={() => onChange("IZIN")} // default ke IZIN saat toggle ke tidak hadir
         >
           Tidak hadir
         </Button>
@@ -121,15 +141,15 @@ function RowStatusControl({
         <div className="inline-flex items-center gap-1">
           <select
             className="h-9 rounded-md border px-2 text-sm"
-            value={isTidakHadir ? value : ''}
+            value={isTidakHadir ? value : ""}
             onChange={(e) => {
-              const val = e.target.value as Status | '';
+              const val = e.target.value as Status | "";
               if (!val) onChange(undefined);
               else onChange(val as Status);
             }}
           >
             <option value="" disabled>
-              {isUnset ? '—' : 'Pilih alasan'}
+              {isUnset ? "—" : "Pilih alasan"}
             </option>
             {NON_HADIR.map((s) => (
               <option key={s} value={s}>
@@ -140,7 +160,11 @@ function RowStatusControl({
           </select>
 
           {!isUnset && (
-            <Button size="sm" variant="ghost" onClick={() => onChange(undefined)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => onChange(undefined)}
+            >
               Hapus
             </Button>
           )}
@@ -161,7 +185,7 @@ function SummaryCounts({
   statusByEmp: Record<string, string>;
 }) {
   const tally = useMemo(() => {
-    const t: Record<'UNSET' | Status, number> = {
+    const t: Record<"UNSET" | Status, number> = {
       UNSET: 0,
       HADIR: 0,
       IZIN: 0,
@@ -170,8 +194,8 @@ function SummaryCounts({
       TK: 0,
     };
     baseRows.forEach((p) => {
-      const raw = (statusByEmp[p.id] as Status | undefined);
-      const key = (raw ?? 'UNSET') as 'UNSET' | Status;
+      const raw = statusByEmp[p.id] as Status | undefined;
+      const key = (raw ?? "UNSET") as "UNSET" | Status;
       t[key] += 1;
     });
     return t;
@@ -196,22 +220,24 @@ function SummaryCounts({
 /** =========================================================
  *  PAGE
  *  =======================================================*/
-type Dir = 'asc' | 'desc';
-type SortBy = 'nama' | 'jabatan';
+type Dir = "asc" | "desc";
+type SortBy = "nama" | "jabatan";
 
 export default function PresensiPage() {
   /** ---------- Stepper: SEKARANG 4 LANGKAH ---------- */
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
 
   /** ---------- Step 2: Detail sesi ---------- */
-  const [tanggal, setTanggal] = useState<string>('');
-  const [jamMulai, setJamMulai] = useState<string>('08:00');
-  const [jamAkhir, setJamAkhir] = useState<string>('09:00');
-  const [deskripsi, setDeskripsi] = useState<string>('');
+  const [tanggal, setTanggal] = useState<string>("");
+  const [jamMulai, setJamMulai] = useState<string>("08:00");
+  const [jamAkhir, setJamAkhir] = useState<string>("09:00");
+  const [deskripsi, setDeskripsi] = useState<string>("");
 
   /** ---------- Master data ---------- */
   const [units, setUnits] = useState<Unit[]>([]);
-  const [employees, setEmployees] = useState<(Employee & { units?: { name: string } | null })[]>([]);
+  const [employees, setEmployees] = useState<
+    (Employee & { units?: { name: string } | null })[]
+  >([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [errMsg, setErrMsg] = useState<string | null>(null);
 
@@ -225,16 +251,21 @@ export default function PresensiPage() {
 
   /** ---------- Unit & status selection ---------- */
   const [unitChecked, setUnitChecked] = useState<Record<string, boolean>>({});
-  const [statusByEmp, setStatusByEmp] = useState<Record<string, Status | undefined>>({});
+  const [statusByEmp, setStatusByEmp] = useState<
+    Record<string, Status | undefined>
+  >({});
 
   /** ---------- Sorting (existing) ---------- */
-  const [sortBy, setSortBy] = useState<SortBy>('nama');
-  const [sortNamaDir, setSortNamaDir] = useState<Dir>('asc');
-  const [sortJabatanDir, setSortJabatanDir] = useState<Dir>('asc');
+  const [sortBy, setSortBy] = useState<SortBy>("nama");
+  const [sortNamaDir, setSortNamaDir] = useState<Dir>("asc");
+  const [sortJabatanDir, setSortJabatanDir] = useState<Dir>("asc");
 
   /** ---------- Save states (existing) ---------- */
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState<{ sesiId: string; tally: Record<Status, number> } | null>(null);
+  const [saved, setSaved] = useState<{
+    sesiId: string;
+    tally: Record<Status, number>;
+  } | null>(null);
 
   /** ---------- Quick save (existing) ---------- */
   const [savingQuick, setSavingQuick] = useState(false);
@@ -244,19 +275,36 @@ export default function PresensiPage() {
   const [openQuickSuccess, setOpenQuickSuccess] = useState(false);
   const [openDoneSuccess, setOpenDoneSuccess] = useState(false);
 
+  const [editSessionId, setEditSessionId] = useState<string | null>(null);
+
+  const [openDelete, setOpenDelete] = useState(false);
+  const [targetDelete, setTargetDelete] = useState<SessionWithCounts | null>(
+    null
+  );
+  const [deleting, setDeleting] = useState(false);
+  const [deleteErr, setDeleteErr] = useState<string | null>(null);
+
   /** ---------- Load master (units, employees) ---------- */
   useEffect(() => {
     let alive = true;
     async function load() {
       setLoading(true);
       setErrMsg(null);
-      const unitsQ = supabase.from('units').select('*').order('name', { ascending: true });
+      const unitsQ = supabase
+        .from("units")
+        .select("*")
+        .order("name", { ascending: true });
       const empQ = supabase
-        .from('employees')
-        .select('id,nama,nip,jabatan,unit_id,status_pg,active, units:unit_id(name)')
-        .order('nama', { ascending: true });
+        .from("employees")
+        .select(
+          "id,nama,nip,jabatan,unit_id,status_pg,active, units:unit_id(name)"
+        )
+        .order("nama", { ascending: true });
 
-      const [{ data: unitsData, error: unitsErr }, { data: empData, error: empErr }] = await Promise.all([unitsQ, empQ]);
+      const [
+        { data: unitsData, error: unitsErr },
+        { data: empData, error: empErr },
+      ] = await Promise.all([unitsQ, empQ]);
       if (!alive) return;
 
       if (unitsErr) {
@@ -288,10 +336,10 @@ export default function PresensiPage() {
       setErrMsg(null);
 
       const sQ = await supabase
-        .from('attendance_sessions')
-        .select('id,tanggal,jam_mulai,jam_akhir,deskripsi,created_at')
-        .order('tanggal', { ascending: false })
-        .order('created_at', { ascending: false })
+        .from("attendance_sessions")
+        .select("id,tanggal,jam_mulai,jam_akhir,deskripsi,created_at")
+        .order("tanggal", { ascending: false })
+        .order("created_at", { ascending: false })
         .limit(100);
 
       if (!alive) return;
@@ -312,9 +360,9 @@ export default function PresensiPage() {
 
       const ids = sessionsRaw.map((s) => s.id);
       const eQ = await supabase
-        .from('attendance_entries')
-        .select('session_id,status')
-        .in('session_id', ids);
+        .from("attendance_entries")
+        .select("session_id,status")
+        .in("session_id", ids);
 
       if (eQ.error) {
         setErrMsg(eQ.error.message);
@@ -322,7 +370,10 @@ export default function PresensiPage() {
         return;
       }
 
-      const countsMap = new Map<string, { counts: Record<Status, number>; total: number }>();
+      const countsMap = new Map<
+        string,
+        { counts: Record<Status, number>; total: number }
+      >();
       sessionsRaw.forEach((s) => {
         countsMap.set(s.id, {
           counts: { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 },
@@ -353,6 +404,68 @@ export default function PresensiPage() {
     };
   }, []);
 
+  async function reloadSessions() {
+    setLoadingSessions(true);
+    setErrMsg(null);
+    const sQ = await supabase
+      .from("attendance_sessions")
+      .select("id,tanggal,jam_mulai,jam_akhir,deskripsi,created_at")
+      .order("tanggal", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(100);
+    if (sQ.error) {
+      setErrMsg(sQ.error.message);
+      setLoadingSessions(false);
+      return;
+    }
+    const sessionsRaw = (sQ.data || []) as SessionLite[];
+
+    if (sessionsRaw.length === 0) {
+      setSessions([]);
+      setLoadingSessions(false);
+      return;
+    }
+
+    const ids = sessionsRaw.map((s) => s.id);
+    const eQ = await supabase
+      .from("attendance_entries")
+      .select("session_id,status")
+      .in("session_id", ids);
+
+    if (eQ.error) {
+      setErrMsg(eQ.error.message);
+      setLoadingSessions(false);
+      return;
+    }
+
+    const countsMap = new Map<
+      string,
+      { counts: Record<Status, number>; total: number }
+    >();
+    sessionsRaw.forEach((s) => {
+      countsMap.set(s.id, {
+        counts: { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 },
+        total: 0,
+      });
+    });
+
+    (eQ.data as { session_id: string; status: Status }[]).forEach((r) => {
+      const obj = countsMap.get(r.session_id);
+      if (obj) {
+        obj.counts[r.status] += 1;
+        obj.total += 1;
+      }
+    });
+
+    const withCounts: SessionWithCounts[] = sessionsRaw.map((s) => {
+      const agg = countsMap.get(s.id)!;
+      return { ...s, counts: agg.counts, total: agg.total };
+    });
+
+    setSessions(withCounts);
+    setLoadingSessions(false);
+  }
+
   /** ---------- Derived ---------- */
   const unitMap = useMemo(() => {
     const m = new Map<string, string>();
@@ -360,19 +473,23 @@ export default function PresensiPage() {
     return m;
   }, [units]);
 
-  const unitsSelected = useMemo(() => Object.keys(unitChecked).filter((id) => unitChecked[id]), [unitChecked]);
+  const unitsSelected = useMemo(
+    () => Object.keys(unitChecked).filter((id) => unitChecked[id]),
+    [unitChecked]
+  );
 
   const baseRows = useMemo(() => {
-    if (unitsSelected.length === 0) return [] as (Employee & { units?: { name: string } | null })[];
+    if (unitsSelected.length === 0)
+      return [] as (Employee & { units?: { name: string } | null })[];
     return employees.filter((p) => unitsSelected.includes(p.unit_id));
   }, [employees, unitsSelected]);
 
   /** ---------- Step helpers ---------- */
   function resetDetail() {
-    setTanggal('');
-    setJamMulai('08:00');
-    setJamAkhir('09:00');
-    setDeskripsi('');
+    setTanggal("");
+    setJamMulai("08:00");
+    setJamAkhir("09:00");
+    setDeskripsi("");
   }
   function startFromScratch() {
     resetDetail();
@@ -386,28 +503,28 @@ export default function PresensiPage() {
   }
 
   /** ---------- Load status dari sesi lama ---------- */
-  async function useFromHistory(sid: string) {
+  async function useFromHistory(sid: string, asEdit = false) {
     setErrMsg(null);
     const sQ = await supabase
-      .from('attendance_sessions')
-      .select('id,tanggal,jam_mulai,jam_akhir,deskripsi')
-      .eq('id', sid)
+      .from("attendance_sessions")
+      .select("id,tanggal,jam_mulai,jam_akhir,deskripsi")
+      .eq("id", sid)
       .maybeSingle();
 
     if (sQ.error || !sQ.data) {
-      setErrMsg(sQ.error?.message || 'Sesi tidak ditemukan.');
+      setErrMsg(sQ.error?.message || "Sesi tidak ditemukan.");
       return;
     }
 
     setTanggal(sQ.data.tanggal);
     setJamMulai(fmtTime(sQ.data.jam_mulai));
     setJamAkhir(fmtTime(sQ.data.jam_akhir));
-    setDeskripsi(sQ.data.deskripsi ?? '');
+    setDeskripsi(sQ.data.deskripsi ?? "");
 
     const eQ = await supabase
-      .from('attendance_entries')
-      .select('employee_id,status')
-      .eq('session_id', sid);
+      .from("attendance_entries")
+      .select("employee_id,status")
+      .eq("session_id", sid);
 
     if (eQ.error) {
       setErrMsg(eQ.error.message);
@@ -425,24 +542,32 @@ export default function PresensiPage() {
     const uChecked: Record<string, boolean> = {};
     unitIds.forEach((uid) => (uChecked[uid] = true));
     setUnitChecked(uChecked);
-
     setStatusByEmp(map);
 
-    setStep(2);
+    if (asEdit) {
+      setEditSessionId(sid); // <-- tanda edit
+    } else {
+      setEditSessionId(null); // gunakan sebagai template biasa
+    }
+
+    setStep(2); // setelah ini user bisa ubah detail → lanjut Step 3
   }
 
   /** ---------- Save (create session + bulk set) ---------- */
   async function handleSave() {
     setErrMsg(null);
-    const selections = Object.entries(statusByEmp).filter(([_, b]) => !!b) as [string, Status][];
+    const selections = Object.entries(statusByEmp).filter(([_, b]) => !!b) as [
+      string,
+      Status
+    ][];
     if (selections.length === 0) return;
 
     try {
       setSaving(true);
 
-      const resCreate = await fetch('/api/sessions/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const resCreate = await fetch("/api/sessions/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           p_tanggal: tanggal,
           p_mulai: jamMulai,
@@ -451,18 +576,25 @@ export default function PresensiPage() {
         }),
       });
       const jsonCreate = await resCreate.json();
-      if (!resCreate.ok) throw new Error(jsonCreate?.error?.message || 'Gagal membuat sesi');
+      if (!resCreate.ok)
+        throw new Error(jsonCreate?.error?.message || "Gagal membuat sesi");
       const sessionId: string = jsonCreate.id;
 
-      const bucketMap: Record<Status, string[]> = { HADIR: [], IZIN: [], SAKIT: [], DL: [], TK: [] };
+      const bucketMap: Record<Status, string[]> = {
+        HADIR: [],
+        IZIN: [],
+        SAKIT: [],
+        DL: [],
+        TK: [],
+      };
       for (const [empId, s] of selections) bucketMap[s].push(empId);
 
       const calls = (Object.keys(bucketMap) as Status[]).map(async (s) => {
         const arr = bucketMap[s];
         if (arr.length === 0) return null;
-        const res = await fetch('/api/attendance/bulk', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/attendance/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             p_session_id: sessionId,
             p_rows: arr,
@@ -479,8 +611,16 @@ export default function PresensiPage() {
 
       await Promise.all(calls);
 
-      const tally: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 };
-      selections.forEach(([_, s]) => { tally[s] += 1; });
+      const tally: Record<Status, number> = {
+        HADIR: 0,
+        IZIN: 0,
+        SAKIT: 0,
+        DL: 0,
+        TK: 0,
+      };
+      selections.forEach(([_, s]) => {
+        tally[s] += 1;
+      });
 
       setSaved({ sesiId: sessionId, tally });
       setStep(4);
@@ -488,7 +628,7 @@ export default function PresensiPage() {
       // === NEW: popup sukses selesai ===
       setOpenDoneSuccess(true);
     } catch (e: any) {
-      setErrMsg(e?.message || 'Terjadi kesalahan saat menyimpan.');
+      setErrMsg(e?.message || "Terjadi kesalahan saat menyimpan.");
     } finally {
       setSaving(false);
     }
@@ -497,15 +637,18 @@ export default function PresensiPage() {
   /** ---------- Quick Save (tanpa pindah step) ---------- */
   async function handleQuickSave() {
     setErrMsg(null);
-    const selections = Object.entries(statusByEmp).filter(([_, b]) => !!b) as [string, Status][];
+    const selections = Object.entries(statusByEmp).filter(([_, b]) => !!b) as [
+      string,
+      Status
+    ][];
     if (selections.length === 0) return;
 
     try {
       setSavingQuick(true);
 
-      const resCreate = await fetch('/api/sessions/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const resCreate = await fetch("/api/sessions/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           p_tanggal: tanggal,
           p_mulai: jamMulai,
@@ -514,18 +657,25 @@ export default function PresensiPage() {
         }),
       });
       const jsonCreate = await resCreate.json();
-      if (!resCreate.ok) throw new Error(jsonCreate?.error?.message || 'Gagal membuat sesi');
+      if (!resCreate.ok)
+        throw new Error(jsonCreate?.error?.message || "Gagal membuat sesi");
       const sessionId: string = jsonCreate.id;
 
-      const bucketMap: Record<Status, string[]> = { HADIR: [], IZIN: [], SAKIT: [], DL: [], TK: [] };
+      const bucketMap: Record<Status, string[]> = {
+        HADIR: [],
+        IZIN: [],
+        SAKIT: [],
+        DL: [],
+        TK: [],
+      };
       for (const [empId, s] of selections) bucketMap[s].push(empId);
 
       const calls = (Object.keys(bucketMap) as Status[]).map(async (s) => {
         const arr = bucketMap[s];
         if (arr.length === 0) return null;
-        const res = await fetch('/api/attendance/bulk', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+        const res = await fetch("/api/attendance/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             p_session_id: sessionId,
             p_rows: arr,
@@ -542,8 +692,16 @@ export default function PresensiPage() {
 
       await Promise.all(calls);
 
-      const tally: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 };
-      selections.forEach(([_, s]) => { tally[s] += 1; });
+      const tally: Record<Status, number> = {
+        HADIR: 0,
+        IZIN: 0,
+        SAKIT: 0,
+        DL: 0,
+        TK: 0,
+      };
+      selections.forEach(([_, s]) => {
+        tally[s] += 1;
+      });
       setSaved({ sesiId: sessionId, tally });
 
       setQuickSavedAt(new Date().toISOString());
@@ -551,9 +709,31 @@ export default function PresensiPage() {
       // === NEW: popup sukses quick save ===
       setOpenQuickSuccess(true);
     } catch (e: any) {
-      setErrMsg(e?.message || 'Terjadi kesalahan saat menyimpan.');
+      setErrMsg(e?.message || "Terjadi kesalahan saat menyimpan.");
     } finally {
       setSavingQuick(false);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!targetDelete) return;
+    try {
+      setDeleting(true);
+      setDeleteErr(null);
+
+      const res = await fetch(`/api/sessions/${targetDelete.id}`, {
+        method: "DELETE",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.error?.message || "Gagal menghapus sesi");
+
+      setOpenDelete(false);
+      setTargetDelete(null);
+      await reloadSessions(); // segarkan tabel riwayat
+    } catch (e: any) {
+      setDeleteErr(e?.message || "Gagal menghapus sesi");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -562,6 +742,7 @@ export default function PresensiPage() {
     setUnitChecked({});
     setStatusByEmp({});
     setSaved(null);
+    setEditSessionId(null); // keluar dari edit mode
     setStep(1);
   }
 
@@ -573,13 +754,13 @@ export default function PresensiPage() {
   const sortedRows = useMemo(() => {
     let rows = baseRows.slice();
     rows = rows.sort((a, b) => {
-      if (sortBy === 'nama') {
+      if (sortBy === "nama") {
         const cmp = a.nama.localeCompare(b.nama);
-        if (cmp !== 0) return sortNamaDir === 'asc' ? cmp : -cmp;
+        if (cmp !== 0) return sortNamaDir === "asc" ? cmp : -cmp;
         return a.jabatan.localeCompare(b.jabatan);
       } else {
         const cmp = a.jabatan.localeCompare(b.jabatan);
-        if (cmp !== 0) return sortJabatanDir === 'asc' ? cmp : -cmp;
+        if (cmp !== 0) return sortJabatanDir === "asc" ? cmp : -cmp;
         return a.nama.localeCompare(b.nama);
       }
     });
@@ -590,19 +771,27 @@ export default function PresensiPage() {
   const sortedRowsByUnit = useMemo(() => {
     const rows = sortedRows.slice();
     rows.sort((a, b) => {
-      const ua = (unitMapLocal.get(a.unit_id) || a.units?.name || '').toString();
-      const ub = (unitMapLocal.get(b.unit_id) || b.units?.name || '').toString();
+      const ua = (
+        unitMapLocal.get(a.unit_id) ||
+        a.units?.name ||
+        ""
+      ).toString();
+      const ub = (
+        unitMapLocal.get(b.unit_id) ||
+        b.units?.name ||
+        ""
+      ).toString();
       const unitCmp = ua.localeCompare(ub);
       if (unitCmp !== 0) return unitCmp;
 
       // jika unit sama, pakai fallback sesuai pilihan sort existing (tidak mengubah logic lama)
-      if (sortBy === 'nama') {
+      if (sortBy === "nama") {
         const cmp = a.nama.localeCompare(b.nama);
-        if (cmp !== 0) return sortNamaDir === 'asc' ? cmp : -cmp;
+        if (cmp !== 0) return sortNamaDir === "asc" ? cmp : -cmp;
         return a.jabatan.localeCompare(b.jabatan);
       } else {
         const cmp = a.jabatan.localeCompare(b.jabatan);
-        if (cmp !== 0) return sortJabatanDir === 'asc' ? cmp : -cmp;
+        if (cmp !== 0) return sortJabatanDir === "asc" ? cmp : -cmp;
         return a.nama.localeCompare(b.nama);
       }
     });
@@ -636,25 +825,46 @@ export default function PresensiPage() {
       <div>
         <h1 className="text-xl font-semibold text-slate-900">Presensi</h1>
         <p className="text-sm text-slate-500">
-          Buat sesi baru atau gunakan riwayat lama, atur status per pegawai, lalu simpan.
+          Buat sesi baru atau gunakan riwayat lama, atur status per pegawai,
+          lalu simpan.
         </p>
       </div>
 
       {/* Stepper indikator (4 langkah) */}
       <div className="grid grid-cols-4 gap-2">
-        <div className={cn('flex items-center gap-2 rounded-xl border px-3 py-2', step === 1 ? 'bg-[#F4F7FB] border-[#003A70]' : '')}>
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-xl border px-3 py-2",
+            step === 1 ? "bg-[#F4F7FB] border-[#003A70]" : ""
+          )}
+        >
           <HistoryIcon className="h-4 w-4" />
           <span className="text-sm">1. Sumber Data</span>
         </div>
-        <div className={cn('flex items-center gap-2 rounded-xl border px-3 py-2', step === 2 ? 'bg-[#F4F7FB] border-[#003A70]' : '')}>
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-xl border px-3 py-2",
+            step === 2 ? "bg-[#F4F7FB] border-[#003A70]" : ""
+          )}
+        >
           <CalendarDays className="h-4 w-4" />
           <span className="text-sm">2. Detail Sesi</span>
         </div>
-        <div className={cn('flex items-center gap-2 rounded-xl border px-3 py-2', step === 3 ? 'bg-[#F4F7FB] border-[#003A70]' : '')}>
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-xl border px-3 py-2",
+            step === 3 ? "bg-[#F4F7FB] border-[#003A70]" : ""
+          )}
+        >
           <Users className="h-4 w-4" />
           <span className="text-sm">3. Unit & Pegawai</span>
         </div>
-        <div className={cn('flex items-center gap-2 rounded-xl border px-3 py-2', step === 4 ? 'bg-[#F4F7FB] border-[#003A70]' : '')}>
+        <div
+          className={cn(
+            "flex items-center gap-2 rounded-xl border px-3 py-2",
+            step === 4 ? "bg-[#F4F7FB] border-[#003A70]" : ""
+          )}
+        >
           <ClipboardList className="h-4 w-4" />
           <span className="text-sm">4. Ringkasan</span>
         </div>
@@ -670,9 +880,13 @@ export default function PresensiPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 <p className="text-sm text-slate-600">
-                  Buat sesi presensi baru dengan mengisi tanggal, jam, dan deskripsi secara manual.
+                  Buat sesi presensi baru dengan mengisi tanggal, jam, dan
+                  deskripsi secara manual.
                 </p>
-                <Button className="bg-[#003A70] hover:opacity-95" onClick={startFromScratch}>
+                <Button
+                  className="bg-[#003A70] hover:opacity-95"
+                  onClick={startFromScratch}
+                >
                   <PlusCircle className="h-4 w-4 mr-2" /> Buat Sesi Baru
                 </Button>
               </CardContent>
@@ -684,7 +898,11 @@ export default function PresensiPage() {
                   <HistoryIcon className="h-4 w-4" />
                   Gunakan dari Riwayat
                 </CardTitle>
-                <Button variant="outline" size="sm" onClick={() => location.reload()}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => location.reload()}
+                >
                   <RefreshCcw className="h-4 w-4 mr-1" /> Muat Ulang
                 </Button>
               </CardHeader>
@@ -714,21 +932,63 @@ export default function PresensiPage() {
                         <TableBody>
                           {sessionsPaginated.map((s) => (
                             <TableRow key={s.id}>
-                              <TableCell className="whitespace-nowrap">{s.tanggal}</TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {s.tanggal}
+                              </TableCell>
                               <TableCell className="whitespace-nowrap">
                                 {fmtTime(s.jam_mulai)} - {fmtTime(s.jam_akhir)}
                               </TableCell>
-                              <TableCell className="whitespace-nowrap">{s.deskripsi || '-'}</TableCell>
-                              <TableCell className="text-right">{s.counts.HADIR}</TableCell>
-                              <TableCell className="text-right">{s.counts.IZIN}</TableCell>
-                              <TableCell className="text-right">{s.counts.SAKIT}</TableCell>
-                              <TableCell className="text-right">{s.counts.DL}</TableCell>
-                              <TableCell className="text-right">{s.counts.TK}</TableCell>
-                              <TableCell className="text-right">{s.total}</TableCell>
+                              <TableCell className="whitespace-nowrap">
+                                {s.deskripsi || "-"}
+                              </TableCell>
                               <TableCell className="text-right">
-                                <Button size="sm" variant="outline" onClick={() => useFromHistory(s.id)}>
-                                  Gunakan
-                                </Button>
+                                {s.counts.HADIR}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {s.counts.IZIN}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {s.counts.SAKIT}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {s.counts.DL}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {s.counts.TK}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                {s.total}
+                              </TableCell>
+                              <TableCell className="text-right">
+                                <div className="inline-flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => useFromHistory(s.id, false)}
+                                  >
+                                    Gunakan
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => useFromHistory(s.id, true)}
+                                    title="Edit sesi ini (ubah jam & status kehadiran pegawai)"
+                                  >
+                                    Edit
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="destructive"
+                                    onClick={() => {
+                                      setTargetDelete(s);
+                                      setDeleteErr(null);
+                                      setOpenDelete(true);
+                                    }}
+                                    title="Hapus sesi"
+                                  >
+                                    Hapus
+                                  </Button>
+                                </div>
                               </TableCell>
                             </TableRow>
                           ))}
@@ -742,23 +1002,29 @@ export default function PresensiPage() {
                         Total: {sessions.length} sesi
                         {sessions.length > 0 && (
                           <>
-                            {' · '}Menampilkan {sessStartNum}
-                            {'–'}{sessEndNum}
-                            {' '}dari {sessions.length}
+                            {" · "}Menampilkan {sessStartNum}
+                            {"–"}
+                            {sessEndNum} dari {sessions.length}
                           </>
                         )}
                       </div>
 
                       <div className="flex items-center gap-3">
                         <div className="flex items-center gap-2">
-                          <span className="text-xs text-slate-600">Rows per page</span>
+                          <span className="text-xs text-slate-600">
+                            Rows per page
+                          </span>
                           <select
                             className="h-8 rounded-md border px-2 text-sm"
                             value={String(sessPageSize)}
-                            onChange={(e) => setSessPageSize(Number(e.target.value))}
+                            onChange={(e) =>
+                              setSessPageSize(Number(e.target.value))
+                            }
                           >
                             {[5, 10, 20, 50].map((n) => (
-                              <option key={n} value={n}>{n}</option>
+                              <option key={n} value={n}>
+                                {n}
+                              </option>
                             ))}
                           </select>
                         </div>
@@ -768,15 +1034,25 @@ export default function PresensiPage() {
                             variant="outline"
                             size="sm"
                             onClick={() => setSessPage(1)}
-                            disabled={sessPage === 1 || loadingSessions || sessions.length === 0}
+                            disabled={
+                              sessPage === 1 ||
+                              loadingSessions ||
+                              sessions.length === 0
+                            }
                           >
                             <ChevronsLeft className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setSessPage((p) => Math.max(1, p - 1))}
-                            disabled={sessPage === 1 || loadingSessions || sessions.length === 0}
+                            onClick={() =>
+                              setSessPage((p) => Math.max(1, p - 1))
+                            }
+                            disabled={
+                              sessPage === 1 ||
+                              loadingSessions ||
+                              sessions.length === 0
+                            }
                           >
                             <ChevronLeft className="h-4 w-4" />
                           </Button>
@@ -788,8 +1064,16 @@ export default function PresensiPage() {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => setSessPage((p) => Math.min(sessTotalPages, p + 1))}
-                            disabled={sessPage === sessTotalPages || loadingSessions || sessions.length === 0}
+                            onClick={() =>
+                              setSessPage((p) =>
+                                Math.min(sessTotalPages, p + 1)
+                              )
+                            }
+                            disabled={
+                              sessPage === sessTotalPages ||
+                              loadingSessions ||
+                              sessions.length === 0
+                            }
                           >
                             <ChevronRight className="h-4 w-4" />
                           </Button>
@@ -797,7 +1081,11 @@ export default function PresensiPage() {
                             variant="outline"
                             size="sm"
                             onClick={() => setSessPage(sessTotalPages)}
-                            disabled={sessPage === sessTotalPages || loadingSessions || sessions.length === 0}
+                            disabled={
+                              sessPage === sessTotalPages ||
+                              loadingSessions ||
+                              sessions.length === 0
+                            }
                           >
                             <ChevronsRight className="h-4 w-4" />
                           </Button>
@@ -807,7 +1095,8 @@ export default function PresensiPage() {
                   </>
                 )}
                 <p className="text-xs text-slate-500 mt-2">
-                  Klik <b>Gunakan</b> untuk memuat status dari sesi terpilih, lalu kamu bisa ubah detailnya di langkah berikutnya.
+                  Klik <b>Gunakan</b> untuk memuat status dari sesi terpilih,
+                  lalu kamu bisa ubah detailnya di langkah berikutnya.
                 </p>
               </CardContent>
             </Card>
@@ -825,15 +1114,30 @@ export default function PresensiPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="tanggal">Tanggal</Label>
-                <Input id="tanggal" type="date" value={tanggal} onChange={(e) => setTanggal(e.target.value)} />
+                <Input
+                  id="tanggal"
+                  type="date"
+                  value={tanggal}
+                  onChange={(e) => setTanggal(e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="jamMulai">Jam Mulai</Label>
-                <Input id="jamMulai" type="time" value={jamMulai} onChange={(e) => setJamMulai(e.target.value)} />
+                <Input
+                  id="jamMulai"
+                  type="time"
+                  value={jamMulai}
+                  onChange={(e) => setJamMulai(e.target.value)}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="jamAkhir">Jam Akhir</Label>
-                <Input id="jamAkhir" type="time" value={jamAkhir} onChange={(e) => setJamAkhir(e.target.value)} />
+                <Input
+                  id="jamAkhir"
+                  type="time"
+                  value={jamAkhir}
+                  onChange={(e) => setJamAkhir(e.target.value)}
+                />
               </div>
             </div>
             <div className="space-y-2">
@@ -854,7 +1158,11 @@ export default function PresensiPage() {
                 <Button variant="outline" onClick={resetDetail}>
                   Reset
                 </Button>
-                <Button className="bg-[#003A70] hover:opacity-95" onClick={goStep3} disabled={!tanggal || !jamMulai || !jamAkhir}>
+                <Button
+                  className="bg-[#003A70] hover:opacity-95"
+                  onClick={goStep3}
+                  disabled={!tanggal || !jamMulai || !jamAkhir}
+                >
                   Lanjut ke Unit & Pegawai
                 </Button>
               </div>
@@ -879,20 +1187,28 @@ export default function PresensiPage() {
                     <label
                       key={u.id}
                       className={cn(
-                        'flex items-center gap-2 rounded-xl border p-3 cursor-pointer',
-                        unitChecked[u.id] ? 'border-[#003A70] bg-[#F4F7FB]' : ''
+                        "flex items-center gap-2 rounded-xl border p-3 cursor-pointer",
+                        unitChecked[u.id] ? "border-[#003A70] bg-[#F4F7FB]" : ""
                       )}
                     >
                       <Checkbox
                         checked={!!unitChecked[u.id]}
-                        onCheckedChange={(v) => setUnitChecked((prev) => ({ ...prev, [u.id]: Boolean(v) }))}
+                        onCheckedChange={(v) =>
+                          setUnitChecked((prev) => ({
+                            ...prev,
+                            [u.id]: Boolean(v),
+                          }))
+                        }
                       />
                       <span className="text-sm">{u.name}</span>
                     </label>
                   ))}
                 </div>
               )}
-              <p className="text-xs text-slate-500">Centang 1 atau beberapa unit. Pegawai di unit terpilih akan muncul di tabel.</p>
+              <p className="text-xs text-slate-500">
+                Centang 1 atau beberapa unit. Pegawai di unit terpilih akan
+                muncul di tabel.
+              </p>
             </CardContent>
           </Card>
 
@@ -907,7 +1223,7 @@ export default function PresensiPage() {
                 onClick={() => {
                   const next = { ...statusByEmp };
                   baseRows.forEach((p) => {
-                    next[p.id] = 'HADIR';
+                    next[p.id] = "HADIR";
                   });
                   setStatusByEmp(next);
                 }}
@@ -920,7 +1236,7 @@ export default function PresensiPage() {
                 onClick={() => {
                   const next = { ...statusByEmp };
                   baseRows.forEach((p) => {
-                    next[p.id] = 'TK';
+                    next[p.id] = "TK";
                   });
                   setStatusByEmp(next);
                 }}
@@ -948,24 +1264,34 @@ export default function PresensiPage() {
                 variant="ghost"
                 className="px-2"
                 onClick={() => {
-                  setSortBy('nama');
-                  setSortNamaDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+                  setSortBy("nama");
+                  setSortNamaDir((d) => (d === "asc" ? "desc" : "asc"));
                 }}
                 title="Urut Nama"
               >
-                Urut Nama {sortNamaDir === 'asc' ? <SortDesc className="ml-1 h-4 w-4" /> : <SortAsc className="ml-1 h-4 w-4" />}
+                Urut Nama{" "}
+                {sortNamaDir === "asc" ? (
+                  <SortDesc className="ml-1 h-4 w-4" />
+                ) : (
+                  <SortAsc className="ml-1 h-4 w-4" />
+                )}
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
                 className="px-2"
                 onClick={() => {
-                  setSortBy('jabatan');
-                  setSortJabatanDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+                  setSortBy("jabatan");
+                  setSortJabatanDir((d) => (d === "asc" ? "desc" : "asc"));
                 }}
                 title="Urut Jabatan"
               >
-                Urut Jabatan {sortJabatanDir === 'asc' ? <SortDesc className="ml-1 h-4 w-4" /> : <SortAsc className="ml-1 h-4 w-4" />}
+                Urut Jabatan{" "}
+                {sortJabatanDir === "asc" ? (
+                  <SortDesc className="ml-1 h-4 w-4" />
+                ) : (
+                  <SortAsc className="ml-1 h-4 w-4" />
+                )}
               </Button>
             </div>
           </div>
@@ -973,7 +1299,10 @@ export default function PresensiPage() {
           <Card>
             <CardHeader className="pb-2 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-base">Ringkasan Sementara</CardTitle>
-              <SummaryCounts baseRows={baseRows} statusByEmp={statusByEmp as Record<string, string>} />
+              <SummaryCounts
+                baseRows={baseRows}
+                statusByEmp={statusByEmp as Record<string, string>}
+              />
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               <div className="rounded-md border overflow-x-auto">
@@ -988,27 +1317,42 @@ export default function PresensiPage() {
                   <TableBody>
                     {unitsSelectedCount === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-sm text-slate-500 py-8">
+                        <TableCell
+                          colSpan={5}
+                          className="text-center text-sm text-slate-500 py-8"
+                        >
                           Pilih setidaknya 1 unit untuk menampilkan pegawai.
                         </TableCell>
                       </TableRow>
                     ) : loading ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-sm text-slate-500 py-8">
+                        <TableCell
+                          colSpan={5}
+                          className="text-center text-sm text-slate-500 py-8"
+                        >
                           Memuat pegawai…
                         </TableCell>
                       </TableRow>
                     ) : sortedRowsByUnit.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="text-center text-sm text-slate-500 py-8">
+                        <TableCell
+                          colSpan={5}
+                          className="text-center text-sm text-slate-500 py-8"
+                        >
                           Tidak ada pegawai pada unit terpilih.
                         </TableCell>
                       </TableRow>
                     ) : (
                       sortedRowsByUnit.map((p) => (
                         <TableRow key={p.id}>
-                          <TableCell className="whitespace-nowrap">{p.nama} <br /> {p.nip}</TableCell>
-                          <TableCell className="whitespace-nowrap">{unitMapLocal.get(p.unit_id) || p.units?.name || '-'}</TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {p.nama} <br /> {p.nip}
+                          </TableCell>
+                          <TableCell className="whitespace-nowrap">
+                            {unitMapLocal.get(p.unit_id) ||
+                              p.units?.name ||
+                              "-"}
+                          </TableCell>
                           <TableCell className="text-right">
                             <RowStatusControl
                               value={statusByEmp[p.id]}
@@ -1044,24 +1388,119 @@ export default function PresensiPage() {
             <div className="flex items-center gap-2">
               {quickSavedAt && (
                 <span className="text-xs text-green-600">
-                  Tersimpan sementara ({new Date(quickSavedAt).toLocaleTimeString()})
+                  Tersimpan sementara (
+                  {new Date(quickSavedAt).toLocaleTimeString()})
                 </span>
               )}
 
               <Button
                 variant="outline"
-                onClick={handleQuickSave}
-                disabled={savingQuick || Object.values(statusByEmp).every((v) => !v)}
+                onClick={async () => {
+                  if (!editSessionId) {
+                    await handleQuickSave(); // tetap logika lama bila bukan edit
+                    return;
+                  }
+                  // QUICK UPDATE: update jam/tanggal/desc + overwrite entries (tanpa pindah step)
+                  try {
+                    setSavingQuick(true);
+                    // update meta sesi
+                    const res1 = await fetch(`/api/sessions/${editSessionId}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        p_tanggal: tanggal,
+                        p_mulai: jamMulai,
+                        p_akhir: jamAkhir,
+                        p_deskripsi: deskripsi || null,
+                      }),
+                    });
+                    const j1 = await res1.json().catch(() => ({}));
+                    if (!res1.ok)
+                      throw new Error(
+                        j1?.error?.message || "Gagal mengubah sesi"
+                      );
+
+                    // siapkan bucket seperti logika lama
+                    const selections = Object.entries(statusByEmp).filter(
+                      ([, b]) => !!b
+                    ) as [string, Status][];
+                    const bucketMap: Record<Status, string[]> = {
+                      HADIR: [],
+                      IZIN: [],
+                      SAKIT: [],
+                      DL: [],
+                      TK: [],
+                    };
+                    for (const [empId, s] of selections)
+                      bucketMap[s].push(empId);
+
+                    // overwrite entries
+                    const res2 = await fetch("/api/attendance/overwrite", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        p_session_id: editSessionId,
+                        p_hadir: bucketMap.HADIR,
+                        p_izin: bucketMap.IZIN,
+                        p_sakit: bucketMap.SAKIT,
+                        p_dl: bucketMap.DL,
+                        p_tk: bucketMap.TK,
+                      }),
+                    });
+                    const j2 = await res2.json().catch(() => ({}));
+                    if (!res2.ok)
+                      throw new Error(
+                        j2?.error?.message || "Gagal menyimpan kehadiran"
+                      );
+
+                    setQuickSavedAt(new Date().toISOString());
+                    setSaved({
+                      sesiId: editSessionId,
+                      tally: {
+                        HADIR: bucketMap.HADIR.length,
+                        IZIN: bucketMap.IZIN.length,
+                        SAKIT: bucketMap.SAKIT.length,
+                        DL: bucketMap.DL.length,
+                        TK: bucketMap.TK.length,
+                      },
+                    });
+                    setOpenQuickSuccess(true);
+                    await reloadSessions();
+                  } catch (e: any) {
+                    setErrMsg(
+                      e?.message || "Terjadi kesalahan saat update cepat."
+                    );
+                  } finally {
+                    setSavingQuick(false);
+                  }
+                }}
+                disabled={
+                  savingQuick || Object.values(statusByEmp).every((v) => !v)
+                }
               >
-                {savingQuick ? 'Menyimpan…' : 'Simpen Presensi'}
+                {savingQuick
+                  ? "Menyimpan…"
+                  : editSessionId
+                  ? "Update Cepat"
+                  : "Simpen Presensi"}
               </Button>
 
               <Button
                 className="bg-[#003A70] hover:opacity-95"
-                onClick={handleSave}
-                disabled={saving || Object.values(statusByEmp).every((v) => !v)}
+                onClick={() => {
+                  // jangan lakukan save apa pun di sini — hanya lanjut ke ringkasan
+                  if (!saved?.sesiId) {
+                    setErrMsg(
+                      'Belum disimpan. Klik "Simpen Presensi" dulu ya.'
+                    );
+                    return;
+                  }
+                  setOpenDoneSuccess(true); // munculkan dialog sukses
+                  setStep(4); // pindah ke Step 4 (Ringkasan)
+                }}
+                disabled={saving || !saved?.sesiId} // disabled sampai ada hasil simpan
               >
-                {saving ? 'Menyimpan...' : 'Selesai'}
+                {editSessionId ? "Selesai (Lanjut Ringkasan)" : "Selesai"}
               </Button>
             </div>
           </div>
@@ -1076,27 +1515,28 @@ export default function PresensiPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex items-center gap-2 text-green-600">
-              <CheckCircle2 className="h-5 w-5" /> <span>Presensi tersimpan.</span>
+              <CheckCircle2 className="h-5 w-5" />{" "}
+              <span>Presensi tersimpan.</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1 text-sm">
                 <div>
-                  <span className="text-slate-500">ID Sesi:</span>{' '}
+                  <span className="text-slate-500">ID Sesi:</span>{" "}
                   <span className="font-medium">{saved.sesiId}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Tanggal:</span>{' '}
+                  <span className="text-slate-500">Tanggal:</span>{" "}
                   <span className="font-medium">{tanggal}</span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Waktu:</span>{' '}
+                  <span className="text-slate-500">Waktu:</span>{" "}
                   <span className="font-medium">
                     {jamMulai} - {jamAkhir}
                   </span>
                 </div>
                 <div>
-                  <span className="text-slate-500">Deskripsi:</span>{' '}
-                  <span className="font-medium">{deskripsi || '-'}</span>
+                  <span className="text-slate-500">Deskripsi:</span>{" "}
+                  <span className="font-medium">{deskripsi || "-"}</span>
                 </div>
               </div>
               <div className="space-y-1 text-sm">
@@ -1112,7 +1552,10 @@ export default function PresensiPage() {
               <Button variant="outline" onClick={() => setStep(3)}>
                 Kembali
               </Button>
-              <Button className="bg-[#003A70] hover:opacity-95" onClick={resetAll}>
+              <Button
+                className="bg-[#003A70] hover:opacity-95"
+                onClick={resetAll}
+              >
                 Buat Sesi Baru
               </Button>
             </div>
@@ -1128,12 +1571,15 @@ export default function PresensiPage() {
           <DialogHeader>
             <DialogTitle>Berhasil</DialogTitle>
             <DialogDescription>
-              Presensi berhasil <b>disimpan sementara</b>. Kamu tetap berada di langkah ini.
+              Presensi berhasil <b>disimpan sementara</b>. Kamu tetap berada di
+              langkah ini.
             </DialogDescription>
           </DialogHeader>
           {saved?.sesiId && (
             <div className="text-sm">
-              <div className="mb-1">ID Sesi: <span className="font-medium">{saved.sesiId}</span></div>
+              <div className="mb-1">
+                ID Sesi: <span className="font-medium">{saved.sesiId}</span>
+              </div>
             </div>
           )}
           <DialogFooter>
@@ -1150,16 +1596,82 @@ export default function PresensiPage() {
           <DialogHeader>
             <DialogTitle>Berhasil</DialogTitle>
             <DialogDescription>
-              Presensi berhasil <b>disimpan</b>. Ringkasan tersaji di langkah berikutnya.
+              Presensi berhasil <b>disimpan</b>. Ringkasan tersaji di langkah
+              berikutnya.
             </DialogDescription>
           </DialogHeader>
           {saved?.sesiId && (
             <div className="text-sm">
-              <div className="mb-1">ID Sesi: <span className="font-medium">{saved.sesiId}</span></div>
+              <div className="mb-1">
+                ID Sesi: <span className="font-medium">{saved.sesiId}</span>
+              </div>
             </div>
           )}
           <DialogFooter>
             <Button onClick={() => setOpenDoneSuccess(false)}>OK</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={openDelete}
+        onOpenChange={(v) => {
+          setOpenDelete(v);
+          if (!v) {
+            setDeleteErr(null);
+            setTargetDelete(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Hapus Sesi Presensi?</DialogTitle>
+            <DialogDescription>
+              Tindakan ini akan menghapus sesi{" "}
+              <b>beserta seluruh kehadirannya</b>.
+              {targetDelete && (
+                <>
+                  <br />
+                  <span className="text-slate-600">
+                    <b>Tanggal:</b> {targetDelete.tanggal} · <b>Waktu:</b>{" "}
+                    {fmtTime(targetDelete.jam_mulai)}–
+                    {fmtTime(targetDelete.jam_akhir)}
+                    {targetDelete.deskripsi ? (
+                      <>
+                        {" "}
+                        · <b>Deskripsi:</b> {targetDelete.deskripsi}
+                      </>
+                    ) : null}
+                    <>
+                      {" "}
+                      · <b>Total entri:</b> {targetDelete.total}
+                    </>
+                  </span>
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleteErr && <div className="text-sm text-red-600">{deleteErr}</div>}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setOpenDelete(false);
+                setDeleteErr(null);
+                setTargetDelete(null);
+              }}
+              disabled={deleting}
+            >
+              Batal
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDelete}
+              disabled={deleting}
+            >
+              {deleting ? "Menghapus..." : "Ya, Hapus"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
