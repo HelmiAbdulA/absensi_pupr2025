@@ -29,6 +29,7 @@ type EntryRow = {
   nip: string          // employees.nip
   status: Status       // attendance_entries.status
   deskripsi: string    // session.deskripsi
+  session_id: string   // ID dari sesi presensi
 }
 
 const COLORS = ['#0E5AAE', '#F4C542', '#10B981', '#6366F1', '#EF4444'] // HADIR, IZIN, SAKIT, DL, TK
@@ -92,7 +93,6 @@ export default function LaporanPage() {
   }, [])
 
   // =============== fetch entries berdasarkan date range ===============
-  // hanya fetch jika hasTriggeredFetch true
   useEffect(() => {
     if (!hasTriggeredFetch) return
     let alive = true
@@ -100,13 +100,12 @@ export default function LaporanPage() {
     async function fetchData() {
       setLoading(true); setErr(null)
 
-      // PENTING: gunakan nama tabel asli pada filter & pakai !inner agar filter efektif
       const { data, error } = await supabase
         .from('attendance_entries')
         .select(`
           id,
           status,
-          session:attendance_sessions!inner ( tanggal, jam_mulai, deskripsi ),
+          session:attendance_sessions!inner ( id, tanggal, jam_mulai, deskripsi ),
           employee:employees!inner ( nama, nip, unit:unit_id ( name ) )
         `)
         .gte('attendance_sessions.tanggal', from)
@@ -128,6 +127,7 @@ export default function LaporanPage() {
         nama: r.employee?.nama || '-',
         nip: r.employee?.nip || '-',
         unit: r.employee?.unit?.name || '-',
+        session_id: r.session?.id || '',
       }))
 
       setRows(flat)
@@ -170,12 +170,77 @@ export default function LaporanPage() {
       return true
     })
   }, [rows, unit, qDebounced])
+  
+  // =============== [PERBAIKAN LOGIKA FINAL] agregasi ===============
+  
+  const totalHariInRange = useMemo(() => {
+    const uniqueDates = new Set(rows.map(r => r.tanggal));
+    return uniqueDates.size;
+  }, [rows]);
 
-  // =============== agregasi ===============
+  const byPerson = useMemo(() => {
+    // Peta untuk menyimpan status final per orang per hari
+    // key: nip|tanggal, value: status
+    const dailyFinalStatus = new Map<string, Status>();
+    const statusPriority: Record<Status, number> = { 'TK': 5, 'SAKIT': 4, 'IZIN': 3, 'DL': 2, 'HADIR': 1 };
+
+    filtered.forEach(r => {
+      const key = `${r.nip}|${r.tanggal}`;
+      const currentStatus = dailyFinalStatus.get(key);
+      // Jika belum ada status untuk hari itu, atau status baru lebih "penting" (nilainya lebih tinggi)
+      if (!currentStatus || statusPriority[r.status] > statusPriority[currentStatus]) {
+        dailyFinalStatus.set(key, r.status);
+      }
+    });
+
+    // Peta untuk agregasi final
+    const map: Record<string, { nama: string; nip: string; unit: string; hadir: number; izin: number; sakit: number; dl: number; tk: number }> = {};
+
+    dailyFinalStatus.forEach((status, key) => {
+      const [nip, tanggal] = key.split('|');
+      const originalEntry = filtered.find(r => r.nip === nip); // Ambil data statis (nama, unit)
+      if (!originalEntry) return;
+
+      if (!map[nip]) {
+        map[nip] = { nama: originalEntry.nama, nip: originalEntry.nip, unit: originalEntry.unit, hadir: 0, izin: 0, sakit: 0, dl: 0, tk: 0 };
+      }
+      
+      if (status === 'HADIR') map[nip].hadir++;
+      if (status === 'IZIN')  map[nip].izin++;
+      if (status === 'SAKIT') map[nip].sakit++;
+      if (status === 'DL')    map[nip].dl++;
+      if (status === 'TK')    map[nip].tk++;
+    });
+    
+    const personRows = Object.values(map).map((p) => ({
+      ...p,
+      total: totalHariInRange,
+      persenHadir: totalHariInRange > 0 ? Math.round((p.hadir / totalHariInRange) * 100) : 0,
+    }));
+
+    return personRows.sort((a,b) => b.persenHadir - a.persenHadir);
+  }, [filtered, totalHariInRange]);
+
+
+  // Agregasi untuk Pie Chart dan Bar Chart juga harus mengikuti logika "satu status per hari per orang"
   const dist = useMemo(() => {
-    const base: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 }
-    filtered.forEach((r) => { base[r.status] += 1 })
-    const total = filtered.length || 1
+    const dailyFinalStatus = new Map<string, Status>();
+    const statusPriority: Record<Status, number> = { 'TK': 5, 'SAKIT': 4, 'IZIN': 3, 'DL': 2, 'HADIR': 1 };
+
+    filtered.forEach(r => {
+      const key = `${r.nip}|${r.tanggal}`;
+      const currentStatus = dailyFinalStatus.get(key);
+      if (!currentStatus || statusPriority[r.status] > statusPriority[currentStatus]) {
+        dailyFinalStatus.set(key, r.status);
+      }
+    });
+
+    const base: Record<Status, number> = { HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 };
+    dailyFinalStatus.forEach(status => {
+      base[status]++;
+    });
+
+    const total = dailyFinalStatus.size || 1;
     const pct = {
       HADIR: Math.round((base.HADIR / total) * 100),
       IZIN: Math.round((base.IZIN / total) * 100),
@@ -183,8 +248,8 @@ export default function LaporanPage() {
       DL: Math.round((base.DL / total) * 100),
       TK: Math.round((base.TK / total) * 100),
     }
-    return { base, pct }
-  }, [filtered])
+    return { base, pct };
+  }, [filtered]);
 
   const pieData = useMemo(() => ([
     { name: 'Hadir', value: dist.base.HADIR },
@@ -195,31 +260,24 @@ export default function LaporanPage() {
   ]), [dist])
 
   const byUnit = useMemo(() => {
-    const map: Record<string, { unit: string; HADIR: number; IZIN: number; SAKIT: number; DL: number; TK: number }> = {}
-    filtered.forEach((r) => {
-      if (!map[r.unit]) map[r.unit] = { unit: r.unit, HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 }
-      map[r.unit][r.status] += 1
-    })
-    return Object.values(map).sort((a, b) => a.unit.localeCompare(b.unit))
-  }, [filtered])
+    const dailyFinalStatus = new Map<string, {status: Status, unit: string}>();
+    const statusPriority: Record<Status, number> = { 'TK': 5, 'SAKIT': 4, 'IZIN': 3, 'DL': 2, 'HADIR': 1 };
 
-  const byPerson = useMemo(() => {
-    const map: Record<string, { nama: string; nip: string; unit: string; total: number; hadir: number; izin: number; sakit: number; dl: number; tk: number }> = {}
-    filtered.forEach((r) => {
-      const key = r.nip
-      if (!map[key]) map[key] = { nama: r.nama, nip: r.nip, unit: r.unit, total: 0, hadir: 0, izin: 0, sakit: 0, dl: 0, tk: 0 }
-      map[key].total++
-      if (r.status === 'HADIR') map[key].hadir++
-      if (r.status === 'IZIN')  map[key].izin++
-      if (r.status === 'SAKIT') map[key].sakit++
-      if (r.status === 'DL')    map[key].dl++
-      if (r.status === 'TK')    map[key].tk++
-    })
-    const rows = Object.values(map).map((p) => ({
-      ...p,
-      persenHadir: p.total ? Math.round((p.hadir / p.total) * 100) : 0,
-    }))
-    return rows.sort((a,b) => b.persenHadir - a.persenHadir)
+    filtered.forEach(r => {
+      const key = `${r.nip}|${r.tanggal}`;
+      const current = dailyFinalStatus.get(key);
+      if (!current || statusPriority[r.status] > statusPriority[current.status]) {
+        dailyFinalStatus.set(key, { status: r.status, unit: r.unit });
+      }
+    });
+
+    const map: Record<string, { unit: string; HADIR: number; IZIN: number; SAKIT: number; DL: number; TK: number }> = {}
+    dailyFinalStatus.forEach(({status, unit}) => {
+      if (!map[unit]) map[unit] = { unit: unit, HADIR: 0, IZIN: 0, SAKIT: 0, DL: 0, TK: 0 }
+      map[unit][status]++;
+    });
+
+    return Object.values(map).sort((a, b) => a.unit.localeCompare(b.unit));
   }, [filtered])
 
   // =============== pagination untuk tabel per pegawai ===============
@@ -227,7 +285,7 @@ export default function LaporanPage() {
   const [pageSize, setPageSize] = useState(10)
   const totalPages = useMemo(() => Math.max(1, Math.ceil(byPerson.length / pageSize)), [byPerson.length, pageSize])
   useEffect(() => {
-    setPage(1) // reset halaman saat filter berubah atau pageSize berubah
+    setPage(1)
   }, [unit, qDebounced, pageSize, from, to, showData])
 
   const pageStart = (page - 1) * pageSize
@@ -236,7 +294,7 @@ export default function LaporanPage() {
 
   // =============== export CSV ===============
   function exportCSVPersons() {
-    const header = ['Nama','NIP','Unit','Total','Hadir','Izin','Sakit','DL','TK','% Hadir']
+    const header = ['Nama','NIP','Unit','Total Hari','Hadir','Izin','Sakit','DL','TK','% Hadir']
     const items = byPerson.map(p => [p.nama, p.nip, p.unit, p.total, p.hadir, p.izin, p.sakit, p.dl, p.tk, p.persenHadir])
     const csv = [header, ...items].map(r => r.join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
@@ -332,7 +390,7 @@ export default function LaporanPage() {
                 className="mt-1"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                aria-invalid={isCustom && !dateFrom}
+                aria-invalid={Boolean(isCustom && !dateFrom)}
               />
               {isCustom && !dateFrom && (
                 <p className="mt-1 text-[11px] text-rose-600">Isi tanggal mulai.</p>
@@ -352,7 +410,7 @@ export default function LaporanPage() {
                 className="mt-1"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                aria-invalid={isCustom && (!dateTo || (dateFrom && dateTo < dateFrom))}
+                aria-invalid={Boolean(isCustom && (!dateTo || (dateFrom && dateTo < dateFrom)))}
               />
               {isCustom && dateFrom && dateTo && dateTo < dateFrom && (
                 <p className="mt-1 text-[11px] text-rose-600">Tanggal “Sampai” tidak boleh lebih awal dari “Dari”.</p>
@@ -407,7 +465,7 @@ export default function LaporanPage() {
               {unit !== 'Semua Unit' && <span className="ml-2">• <span className="font-medium">Unit:</span> {unit}</span>}
               {qDebounced && <span className="ml-2">• <span className="font-medium">Filter:</span> “{qDebounced}”</span>}
             </div>
-            <div className="text-sm text-blue-600">Total: {filtered.length} entri</div>
+            <div className="text-sm text-blue-600">Total: {byPerson.length} pegawai dalam {totalHariInRange} hari kerja</div>
           </div>
         </div>
       )}
@@ -417,7 +475,7 @@ export default function LaporanPage() {
         <>
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
             <Card className="xl:col-span-1">
-              <CardHeader className="pb-2"><CardTitle className="text-base">Distribusi Status</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-base">Distribusi Status Harian</CardTitle></CardHeader>
               <CardContent className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <RePieChart>
@@ -439,7 +497,7 @@ export default function LaporanPage() {
             </Card>
 
             <Card className="xl:col-span-2">
-              <CardHeader className="pb-2"><CardTitle className="text-base">Rekap Per Unit</CardTitle></CardHeader>
+              <CardHeader className="pb-2"><CardTitle className="text-base">Rekap Harian Per Unit</CardTitle></CardHeader>
               <CardContent className="h-72">
                 <ResponsiveContainer width="100%" height="100%">
                   <ReBarChart data={byUnit}>
@@ -527,7 +585,7 @@ export default function LaporanPage() {
                       <TableHead>Nama</TableHead>
                       <TableHead>NIP</TableHead>
                       <TableHead>Unit</TableHead>
-                      <TableHead>Total</TableHead>
+                      <TableHead>Total Hari</TableHead>
                       <TableHead>Hadir</TableHead>
                       <TableHead>Izin</TableHead>
                       <TableHead>Sakit</TableHead>

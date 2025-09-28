@@ -1,3 +1,6 @@
+// =================================================================
+// IMPORTS
+// =================================================================
 import { supabase } from "./supabaseClient";
 import { supabaseAdmin } from "./supabaseAdmin";
 import type {
@@ -9,6 +12,31 @@ import type {
   RpcSetAttendanceBulkArgs, RpcSetAttendanceBulkResult,
   SearchGlobalRow, RpcSearchGlobalArgs
 } from "@/types";
+
+// [BARU] Impor pool koneksi untuk PostgreSQL Lokal
+import pool from './postgres';
+
+// =================================================================
+// FUNGSI UNTUK KONEKSI KE POSTGRESQL LOKAL
+// =================================================================
+
+/** [BARU] Ambil daftar pegawai (dari PostgreSQL Lokal) */
+export async function getEmployeesFromLocalDB(): Promise<Employee[]> {
+  const client = await pool.connect();
+  try {
+    const result = await client.query('SELECT * FROM public.employees ORDER BY nama ASC;');
+    return result.rows;
+  } catch (error) {
+    console.error('Error fetching from local DB:', error);
+    throw error; // Lemparkan error agar bisa ditangani di tempat pemanggilan
+  } finally {
+    client.release(); // Selalu kembalikan koneksi ke pool
+  }
+}
+
+// =================================================================
+// FUNGSI UNTUK KONEKSI KE SUPABASE (KODE LAMA ANDA)
+// =================================================================
 
 /** ========= READ (client-safe) ========= */
 
