@@ -17,7 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import {
-  Download, Plus, UserPlus, FileDown, Filter, RefreshCw,
+  Download, Plus, UserPlus, Filter, RefreshCw,
   ChevronsLeft, ChevronLeft, ChevronRight, ChevronsRight
 } from 'lucide-react';
 import {
@@ -50,6 +50,12 @@ type EntryJoined = {
     unit_id: UUID;
     unit: { name: string } | null;
   } | null;
+};
+
+// Tipe spesifik untuk data summary hari ini
+type SummaryEntry = {
+  status: Status;
+  employee: { nip: string } | null;
 };
 
 // Tipe spesifik dan akurat untuk data tren
@@ -105,6 +111,9 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState<boolean>(true);
   const [err, setErr] = useState<string | null>(null);
   const [trendData, setTrendData] = useState<Array<{ day: string; hadir: number }>>([]);
+  // PERBAIKAN: State baru khusus untuk menampung semua entri hari ini demi akurasi summary
+  const [todayEntries, setTodayEntries] = useState<SummaryEntry[]>([]);
+
 
   // pagination state
   const [pageSize, setPageSize] = useState<number>(10);
@@ -127,25 +136,29 @@ export default function DashboardPage() {
         const sTodayQ = supabase.from('attendance_sessions').select('id,tanggal,jam_mulai,jam_akhir,deskripsi,created_at').eq('tanggal', YMD).order('jam_mulai', { ascending: true });
         const entriesQ = supabase.from('attendance_entries').select('id,status,created_at,session:session_id(tanggal,jam_mulai),employee:employee_id(nama,nip,unit_id,unit:unit_id(name))').order('created_at', { ascending: false }).limit(250).returns<EntryJoined[]>();
         const trendEntriesQ = supabase.from('attendance_entries').select('status, employee_id, session:session_id!inner(tanggal, id)').gte('session.tanggal', from7).lte('session.tanggal', YMD).returns<TrendEntry[]>();
-        
+        // PERBAIKAN: Query baru untuk mengambil semua entri hari ini, khusus untuk summary.
+        const entriesTodayQ = supabase.from('attendance_entries').select('status,employee:employee_id(nip),session:session_id!inner(tanggal)').eq('session.tanggal', YMD).returns<SummaryEntry[]>();
+
         const [
           { data: unitsData, error: uErr },
           { count: empCount, error: eErr },
           { data: sToday, error: sTodayErr },
           { data: entriesData, error: entErr },
-          { data: trendEntriesData, error: trendErr }
-        ] = await Promise.all([uQ, eCountQ, sTodayQ, entriesQ, trendEntriesQ]);
+          { data: trendEntriesData, error: trendErr },
+          { data: entriesTodayData, error: entTodayErr } // PERBAIKAN: Ambil hasil query baru
+        ] = await Promise.all([uQ, eCountQ, sTodayQ, entriesQ, trendEntriesQ, entriesTodayQ]);
 
         if (!alive) return;
 
-        const errors = [uErr, eErr, sTodayErr, entErr, trendErr].filter(Boolean);
+        const errors = [uErr, eErr, sTodayErr, entErr, trendErr, entTodayErr].filter(Boolean);
         if (errors.length > 0) throw errors[0];
 
         setUnits(unitsData || []);
         setTotalEmployees(empCount ?? 0);
         setSessionsToday(sToday || []);
         setRecentEntries(entriesData || []);
-        
+        setTodayEntries(entriesTodayData || []); // PERBAIKAN: Simpan data summary ke state baru
+
         const dailyFinalStatus = new Map<string, Status>();
         
         (trendEntriesData || []).forEach(r => {
@@ -187,8 +200,8 @@ export default function DashboardPage() {
   }, []);
 
   const todaySummary = useMemo(() => {
-    const YMD = todayYMD();
-    const rowsToday = recentEntries.filter(r => r.session?.tanggal === YMD);
+    // PERBAIKAN: Gunakan state `todayEntries` yang datanya pasti lengkap untuk hari ini.
+    const rowsToday = todayEntries;
 
     const dailyFinalStatus = new Map<string, Status>();
     rowsToday.forEach(r => {
@@ -208,7 +221,8 @@ export default function DashboardPage() {
     const hadirPct = totalEmployees > 0 ? Math.round((hadir / totalEmployees) * 100) : 0;
     
     return { total, hadir, hadirPct, count };
-  }, [recentEntries, totalEmployees]);
+    // PERBAIKAN: Ubah dependensi ke state yang baru
+  }, [todayEntries, totalEmployees]);
 
   const unitOptions = useMemo(() => ['Semua Unit', ...units.map(u => u.name)], [units]);
 
@@ -269,101 +283,89 @@ export default function DashboardPage() {
   }
 
   async function exportExcel() {
-  const wb = new ExcelJS.Workbook();
-  wb.creator = "PUPR Attendance";
-  wb.created = new Date();
+    const wb = new ExcelJS.Workbook();
+    wb.creator = "PUPR Attendance";
+    wb.created = new Date();
 
-  const ws = wb.addWorksheet("Presensi", {
-    views: [{ state: "frozen", ySplit: 1 }], // freeze header
-    properties: { defaultRowHeight: 18 },
-  });
-
-  // Kolom + lebar
-  ws.columns = [
-    { header: "Tanggal", key: "tanggal", width: 12 },
-    { header: "Jam", key: "jam", width: 8 },
-    { header: "Unit", key: "unit", width: 28 },
-    { header: "Nama", key: "nama", width: 28 },
-    { header: "NIP", key: "nip", width: 20 },
-    { header: "Status", key: "status", width: 10 },
-  ];
-
-  // Styling header
-  const header = ws.getRow(1);
-  header.font = { bold: true, color: { argb: "FFFFFFFF" } };
-  header.alignment = { vertical: "middle", horizontal: "center" };
-  header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF003A70" } }; // biru gelap
-  header.height = 24;
-
-  // Data
-  const rows = filtered.map((r) => ({
-    tanggal: r.session?.tanggal ?? "",
-    jam: fmtTimeHHmm(r.session?.jam_mulai),
-    unit: r.employee?.unit?.name ?? "-",
-    nama: r.employee?.nama ?? "-",
-    nip: r.employee?.nip ?? "-",
-    status: r.status,
-  }));
-
-  // Peta warna status
-  const statusFill: Record<string, string> = {
-    HADIR: "FF1E88E5", // hijau
-    IZIN: "FFF9A825",  // biru
-    SAKIT: "FFF9A825", // kuning
-    DL: "FF6A1B9A",    // ungu
-    TK: "FFC62828",    // merah
-  };
-
-  // Tambah baris + styling baris
-  rows.forEach((data, idx) => {
-    const row = ws.addRow(data);
-
-    // zebra striping untuk keterbacaan
-    if (idx % 2 === 0) {
-      row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F7FB" } };
-    }
-
-    // border tipis + vertical align
-    row.eachCell({ includeEmpty: true }, (cell) => {
-      cell.border = {
-        top: { style: "thin", color: { argb: "FFE2E8F0" } },
-        left: { style: "thin", color: { argb: "FFE2E8F0" } },
-        bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
-        right: { style: "thin", color: { argb: "FFE2E8F0" } },
-      };
-      cell.alignment = { vertical: "middle" };
+    const ws = wb.addWorksheet("Presensi", {
+      views: [{ state: "frozen", ySplit: 1 }], // freeze header
+      properties: { defaultRowHeight: 18 },
     });
 
-    // badge warna untuk kolom Status
-    const c = row.getCell(6);
-    const color = statusFill[data.status] || "FF9CA3AF"; // default abu
-    c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
-    c.font = { bold: true, color: { argb: color === "FFF9A825" ? "FF000000" : "FFFFFFFF" } }; // teks hitam untuk kuning
-    c.alignment = { horizontal: "center" };
-    row.height = 20;
-  });
+    ws.columns = [
+      { header: "Tanggal", key: "tanggal", width: 12 },
+      { header: "Jam", key: "jam", width: 8 },
+      { header: "Unit", key: "unit", width: 28 },
+      { header: "Nama", key: "nama", width: 28 },
+      { header: "NIP", key: "nip", width: 20 },
+      { header: "Status", key: "status", width: 10 },
+    ];
 
-  // Autofilter di header
-  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 6 } };
+    const header = ws.getRow(1);
+    header.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    header.alignment = { vertical: "middle", horizontal: "center" };
+    header.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF003A70" } };
+    header.height = 24;
 
-  // Simpan file
-  const buf = await wb.xlsx.writeBuffer();
-  const blob = new Blob([buf], {
-    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-  });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `presensi_terbaru_${todayYMD()}.xlsx`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+    const rows = filtered.map((r) => ({
+      tanggal: r.session?.tanggal ?? "",
+      jam: fmtTimeHHmm(r.session?.jam_mulai),
+      unit: r.employee?.unit?.name ?? "-",
+      nama: r.employee?.nama ?? "-",
+      nip: r.employee?.nip ?? "-",
+      status: r.status,
+    }));
 
-  const sesiHariIniCount = sessionsToday.length;
-  const sesiHariIniList = sessionsToday.map(s => fmtTimeHHmm(s.jam_mulai)).filter(Boolean).join(', ');
+    const statusFill: Record<string, string> = {
+      HADIR: "FF1E88E5",
+      IZIN: "FFF9A825",
+      SAKIT: "FFF9A825",
+      DL: "FF6A1B9A",
+      TK: "FFC62828",
+    };
+
+    rows.forEach((data, idx) => {
+      const row = ws.addRow(data);
+
+      if (idx % 2 === 0) {
+        row.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFF5F7FB" } };
+      }
+
+      row.eachCell({ includeEmpty: true }, (cell) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFE2E8F0" } },
+          left: { style: "thin", color: { argb: "FFE2E8F0" } },
+          bottom: { style: "thin", color: { argb: "FFE2E8F0" } },
+          right: { style: "thin", color: { argb: "FFE2E8F0" } },
+        };
+        cell.alignment = { vertical: "middle" };
+      });
+
+      const c = row.getCell(6);
+      const color = statusFill[data.status] || "FF9CA3AF";
+      c.fill = { type: "pattern", pattern: "solid", fgColor: { argb: color } };
+      c.font = { bold: true, color: { argb: color === "FFF9A825" ? "FF000000" : "FFFFFFFF" } };
+      c.alignment = { horizontal: "center" };
+      row.height = 20;
+    });
+
+    ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 6 } };
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `presensi_terbaru_${todayYMD()}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   return (
     <div className="space-y-6">
+      {/* ... Sisa kode JSX di bawah ini tidak perlu diubah sama sekali ... */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="flex items-center gap-2">
           <Button className="bg-[#003A70] hover:opacity-95" onClick={() => location.assign('/presensi')}>
