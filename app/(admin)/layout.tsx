@@ -4,7 +4,6 @@ import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/shared/Sidebar";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,7 +46,6 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
             Sistem Presensi PUPR
           </p>
           <div className="flex items-center gap-4">
-            <Input placeholder="search...." className="w-48" />
 
             {/* Avatar + Dropdown */}
             <DropdownMenu>
