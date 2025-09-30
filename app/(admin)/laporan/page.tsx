@@ -13,7 +13,7 @@ import {
   PieChart as RePieChart, Pie, Cell,
   BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
-import * as XLSX from 'xlsx' // (disimpan bila nanti dipakai)
+
 import { supabase } from '@/lib/supabaseClient'
 import type { StatusKehadiran } from '@/types'
 
