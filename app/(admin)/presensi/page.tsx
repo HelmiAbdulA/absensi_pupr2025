@@ -961,20 +961,14 @@ export default function PresensiPage() {
                               </TableCell>
                               <TableCell className="text-right">
                                 <div className="inline-flex gap-2">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => useFromHistory(s.id, false)}
-                                  >
-                                    Gunakan
-                                  </Button>
+                                  
                                   <Button
                                     size="sm"
                                     variant="secondary"
                                     onClick={() => useFromHistory(s.id, true)}
                                     title="Edit sesi ini (ubah jam & status kehadiran pegawai)"
                                   >
-                                    Edit
+                                    Update
                                   </Button>
                                   <Button
                                     size="sm"
