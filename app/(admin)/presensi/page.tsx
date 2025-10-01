@@ -1216,7 +1216,9 @@ export default function PresensiPage() {
             <div className="text-xs text-slate-600">
               <b>{baseRows.length}</b> pegawai pada unit terpilih.
             </div>
-            <div className="flex items-center gap-2">
+
+            {/* Perubahan ada di baris di bawah ini */}
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 size="sm"
                 variant="outline"
