@@ -13,6 +13,7 @@ import {
   PieChart as RePieChart, Pie, Cell,
   BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts'
+import ExcelJS from "exceljs";
 
 import { supabase } from '@/lib/supabaseClient'
 import type { StatusKehadiran } from '@/types'
@@ -32,10 +33,124 @@ type EntryRow = {
   session_id: string   // ID dari sesi presensi
 }
 
+// DEFINISI TIPE BARU UNTUK DATA EXCEL
+type PersonData = {
+  nama: string;
+  nip: string;
+  unit: string;
+  total: number;
+  hadir: number;
+  izin: number;
+  sakit: number;
+  dl: number;
+  tk: number;
+  persenHadir: number;
+};
+
+type UnitData = {
+  unit: string;
+  HADIR: number;
+  IZIN: number;
+  SAKIT: number;
+  DL: number;
+  TK: number;
+};
+
+
 const COLORS = ['#0E5AAE', '#F4C542', '#10B981', '#6366F1', '#EF4444'] // HADIR, IZIN, SAKIT, DL, TK
 
 // util kecil
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n))
+const todayYMD = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// =================== FUNGSI EKSPOR EXCEL ===================
+
+// TIPE DITERAPKAN PADA PARAMETER FUNGSI
+async function exportExcelPersons(data: PersonData[], from: string, to: string) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(`Rekap Pegawai`);
+  
+  ws.addRow([`Rekap Presensi Per Pegawai`]).font = { bold: true, size: 14 };
+  ws.addRow([`Periode: ${from} s/d ${to}`]);
+  ws.addRow([]); // Baris kosong
+
+  const headerRow = ws.addRow([
+    "Nama", "NIP", "Unit", "Total Hari", "Hadir", "Izin", "Sakit", "DL", "TK", "% Hadir"
+  ]);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF003A70" } };
+  headerRow.alignment = { vertical: "middle", horizontal: "center" };
+  
+  ws.columns = [
+    { key: "nama", width: 30 }, { key: "nip", width: 22 }, { key: "unit", width: 30 },
+    { key: "total", width: 12 }, { key: "hadir", width: 10 }, { key: "izin", width: 10 },
+    { key: "sakit", width: 10 }, { key: "dl", width: 10 }, { key: "tk", width: 10 },
+    { key: "persenHadir", width: 12 },
+  ];
+
+  data.forEach(p => {
+    ws.addRow({
+      ...p,
+      persenHadir: p.persenHadir / 100
+    });
+  });
+  
+  ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+    if (rowNumber > 3) {
+      row.alignment = { vertical: 'middle' };
+      const pctCell = row.getCell('persenHadir');
+      pctCell.numFmt = '0%';
+    }
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `rekap_per_pegawai_${todayYMD()}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// TIPE DITERAPKAN PADA PARAMETER FUNGSI
+async function exportExcelUnits(data: UnitData[], from: string, to: string) {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(`Rekap Unit`);
+
+  ws.addRow([`Rekap Presensi Per Unit Kerja`]).font = { bold: true, size: 14 };
+  ws.addRow([`Periode: ${from} s/d ${to}`]);
+  ws.addRow([]);
+
+  const headerRow = ws.addRow(["Unit", "Hadir", "Izin", "Sakit", "DL", "TK"]);
+  headerRow.font = { bold: true, color: { argb: "FFFFFFFF" } };
+  headerRow.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF003A70" } };
+  headerRow.alignment = { vertical: "middle", horizontal: "center" };
+
+  ws.columns = [
+    { key: "unit", width: 40 }, { key: "HADIR", width: 10 }, { key: "IZIN", width: 10 },
+    { key: "SAKIT", width: 10 }, { key: "DL", width: 10 }, { key: "TK", width: 10 },
+  ];
+
+  ws.addRows(data);
+  
+  ws.eachRow((row, rowNumber) => {
+    if (rowNumber > 3) row.alignment = { vertical: 'middle' };
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `rekap_per_unit_${todayYMD()}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 
 // ====================================================
 export default function LaporanPage() {
@@ -52,6 +167,8 @@ export default function LaporanPage() {
   const [units, setUnits] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  
+  const [isExportingExcel, setIsExportingExcel] = useState(false);
 
   // kontrol tampilan data
   const [showData, setShowData] = useState(false)
@@ -178,27 +295,23 @@ export default function LaporanPage() {
     return uniqueDates.size;
   }, [rows]);
 
-  const byPerson = useMemo(() => {
-    // Peta untuk menyimpan status final per orang per hari
-    // key: nip|tanggal, value: status
+  const byPerson: PersonData[] = useMemo(() => {
     const dailyFinalStatus = new Map<string, Status>();
     const statusPriority: Record<Status, number> = { 'TK': 5, 'SAKIT': 4, 'IZIN': 3, 'DL': 2, 'HADIR': 1 };
 
     filtered.forEach(r => {
       const key = `${r.nip}|${r.tanggal}`;
       const currentStatus = dailyFinalStatus.get(key);
-      // Jika belum ada status untuk hari itu, atau status baru lebih "penting" (nilainya lebih tinggi)
       if (!currentStatus || statusPriority[r.status] > statusPriority[currentStatus]) {
         dailyFinalStatus.set(key, r.status);
       }
     });
 
-    // Peta untuk agregasi final
     const map: Record<string, { nama: string; nip: string; unit: string; hadir: number; izin: number; sakit: number; dl: number; tk: number }> = {};
 
     dailyFinalStatus.forEach((status, key) => {
-      const [nip, tanggal] = key.split('|');
-      const originalEntry = filtered.find(r => r.nip === nip); // Ambil data statis (nama, unit)
+      const [nip] = key.split('|');
+      const originalEntry = filtered.find(r => r.nip === nip);
       if (!originalEntry) return;
 
       if (!map[nip]) {
@@ -222,7 +335,7 @@ export default function LaporanPage() {
   }, [filtered, totalHariInRange]);
 
 
-  // Agregasi untuk Pie Chart dan Bar Chart juga harus mengikuti logika "satu status per hari per orang"
+  // Agregasi untuk Pie Chart dan Bar Chart
   const dist = useMemo(() => {
     const dailyFinalStatus = new Map<string, Status>();
     const statusPriority: Record<Status, number> = { 'TK': 5, 'SAKIT': 4, 'IZIN': 3, 'DL': 2, 'HADIR': 1 };
@@ -259,7 +372,7 @@ export default function LaporanPage() {
     { name: 'TK',    value: dist.base.TK    },
   ]), [dist])
 
-  const byUnit = useMemo(() => {
+  const byUnit: UnitData[] = useMemo(() => {
     const dailyFinalStatus = new Map<string, {status: Status, unit: string}>();
     const statusPriority: Record<Status, number> = { 'TK': 5, 'SAKIT': 4, 'IZIN': 3, 'DL': 2, 'HADIR': 1 };
 
@@ -292,7 +405,26 @@ export default function LaporanPage() {
   const pageEnd = Math.min(page * pageSize, byPerson.length)
   const byPersonPage = useMemo(() => byPerson.slice(pageStart, pageEnd), [byPerson, pageStart, pageEnd])
 
-  // =============== export CSV ===============
+  // =============== Handlers untuk Ekspor ===============
+  const handleExportExcelPersons = async () => {
+    if (isExportingExcel) return;
+    setIsExportingExcel(true);
+    try {
+      await exportExcelPersons(byPerson, from, to);
+    } catch (e) { console.error(e); setErr("Gagal membuat file Excel Pegawai."); }
+    finally { setIsExportingExcel(false); }
+  }
+  
+  const handleExportExcelUnits = async () => {
+    if (isExportingExcel) return;
+    setIsExportingExcel(true);
+    try {
+      await exportExcelUnits(byUnit, from, to);
+    } catch (e) { console.error(e); setErr("Gagal membuat file Excel Unit."); }
+    finally { setIsExportingExcel(false); }
+  }
+
+  // =============== export CSV & Print (tidak diubah) ===============
   function exportCSVPersons() {
     const header = ['Nama','NIP','Unit','Total Hari','Hadir','Izin','Sakit','DL','TK','% Hadir']
     const items = byPerson.map(p => [p.nama, p.nip, p.unit, p.total, p.hadir, p.izin, p.sakit, p.dl, p.tk, p.persenHadir])
@@ -332,9 +464,11 @@ export default function LaporanPage() {
           <p className="text-sm text-slate-500">Rekap persentase harian, mingguan, bulanan, atau rentang kustom.</p>
         </div>
         {showData && (
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={exportCSVUnits}><Download className="h-4 w-4 mr-1"/> Ekspor Per Unit</Button>
-            <Button variant="outline" size="sm" onClick={exportCSVPersons}><FileDown className="h-4 w-4 mr-1"/> Ekspor Per Pegawai</Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={handleExportExcelUnits} disabled={isExportingExcel}>
+              <Download className="h-4 w-4 mr-1"/>{isExportingExcel ? 'Memproses...' : 'Ekspor Unit (Excel)'}
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportCSVUnits}><Download className="h-4 w-4 mr-1"/> Ekspor Unit (CSV)</Button>
             <Button variant="outline" size="sm" onClick={printReport}><Printer className="h-4 w-4 mr-1"/> Cetak</Button>
           </div>
         )}
@@ -377,13 +511,10 @@ export default function LaporanPage() {
         <CardContent>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
 
-            {/* Dari */}
             <div className={isCustom ? '' : 'opacity-60 pointer-events-none'}>
               <Label className="text-xs text-slate-500 flex items-center justify-between">
                 <span>Dari</span>
-                {isCustom && !dateFrom && (
-                  <span className="text-[10px] text-rose-600">wajib</span>
-                )}
+                {isCustom && !dateFrom && (<span className="text-[10px] text-rose-600">wajib</span>)}
               </Label>
               <Input
                 type="date"
@@ -392,18 +523,13 @@ export default function LaporanPage() {
                 onChange={(e) => setDateFrom(e.target.value)}
                 aria-invalid={Boolean(isCustom && !dateFrom)}
               />
-              {isCustom && !dateFrom && (
-                <p className="mt-1 text-[11px] text-rose-600">Isi tanggal mulai.</p>
-              )}
+              {isCustom && !dateFrom && (<p className="mt-1 text-[11px] text-rose-600">Isi tanggal mulai.</p>)}
             </div>
 
-            {/* Sampai */}
             <div className={isCustom ? '' : 'opacity-60 pointer-events-none'}>
               <Label className="text-xs text-slate-500 flex items-center justify-between">
                 <span>Sampai</span>
-                {isCustom && !dateTo && (
-                  <span className="text-[10px] text-rose-600">wajib</span>
-                )}
+                {isCustom && !dateTo && (<span className="text-[10px] text-rose-600">wajib</span>)}
               </Label>
               <Input
                 type="date"
@@ -412,15 +538,10 @@ export default function LaporanPage() {
                 onChange={(e) => setDateTo(e.target.value)}
                 aria-invalid={Boolean(isCustom && (!dateTo || (dateFrom && dateTo < dateFrom)))}
               />
-              {isCustom && dateFrom && dateTo && dateTo < dateFrom && (
-                <p className="mt-1 text-[11px] text-rose-600">Tanggal “Sampai” tidak boleh lebih awal dari “Dari”.</p>
-              )}
-              {isCustom && !dateTo && (
-                <p className="mt-1 text-[11px] text-rose-600">Isi tanggal akhir.</p>
-              )}
+              {isCustom && dateFrom && dateTo && dateTo < dateFrom && (<p className="mt-1 text-[11px] text-rose-600">Tanggal “Sampai” tidak boleh lebih awal dari “Dari”.</p>)}
+              {isCustom && !dateTo && (<p className="mt-1 text-[11px] text-rose-600">Isi tanggal akhir.</p>)}
             </div>
 
-            {/* Unit */}
             <div>
               <Label className="text-xs text-slate-500">Unit</Label>
               <Select value={unit} onValueChange={(v) => setUnit(v)}>
@@ -432,7 +553,6 @@ export default function LaporanPage() {
               </Select>
             </div>
 
-            {/* Pencarian */}
             <div className="xl:col-span-2">
               <Label className="text-xs text-slate-500">Pencarian</Label>
               <div className="relative mt-1">
@@ -446,8 +566,7 @@ export default function LaporanPage() {
               </div>
             </div>
           </div>
-
-          {/* Info kecil di bawah filter saat custom */}
+          
           {isCustom && (
             <div className="mt-2 text-[11px] text-slate-500">
               Isi tanggal <span className="font-medium">Dari</span> dan <span className="font-medium">Sampai</span> lalu klik <span className="font-medium">Tampilkan Data</span>.
@@ -456,7 +575,6 @@ export default function LaporanPage() {
         </CardContent>
       </Card>
 
-      {/* Info periode setelah data tampil */}
       {showData && (
         <div className="mt-0 p-3 bg-blue-50 rounded-md border">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
@@ -470,7 +588,6 @@ export default function LaporanPage() {
         </div>
       )}
 
-      {/* Hanya tampilkan data jika showData true */}
       {showData && (
         <>
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -519,12 +636,14 @@ export default function LaporanPage() {
           <Card>
             <CardHeader className="pb-2 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
               <CardTitle className="text-base">Rekap Per Pegawai</CardTitle>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={exportCSVPersons}><Download className="h-4 w-4 mr-1"/> Ekspor CSV</Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={handleExportExcelPersons} disabled={isExportingExcel}>
+                  <FileDown className="h-4 w-4 mr-1"/>{isExportingExcel ? 'Memproses...' : 'Ekspor Pegawai (Excel)'}
+                </Button>
+                <Button variant="outline" size="sm" onClick={exportCSVPersons}><FileDown className="h-4 w-4 mr-1"/> Ekspor Pegawai (CSV)</Button>
               </div>
             </CardHeader>
             <CardContent>
-              {/* Controls: page size & info */}
               <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs text-slate-600">
                 <div>
                   {byPerson.length > 0 ? (
@@ -541,39 +660,11 @@ export default function LaporanPage() {
                     {[10, 25, 50].map(n => <option key={n} value={n}>{n}</option>)}
                   </select>
                   <div className="ml-3 flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(1)}
-                      disabled={page === 1}
-                    >
-                      {'<<'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => clamp(p - 1, 1, totalPages))}
-                      disabled={page === 1}
-                    >
-                      {'<'}
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setPage(1)} disabled={page === 1}>{'<<'}</Button>
+                    <Button variant="outline" size="sm" onClick={() => setPage(p => clamp(p - 1, 1, totalPages))} disabled={page === 1}>{'<'}</Button>
                     <span className="px-1">Hal {page} / {totalPages}</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(p => clamp(p + 1, 1, totalPages))}
-                      disabled={page === totalPages}
-                    >
-                      {'>'}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPage(totalPages)}
-                      disabled={page === totalPages}
-                    >
-                      {'>>'}
-                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => setPage(p => clamp(p + 1, 1, totalPages))} disabled={page === totalPages}>{'>'}</Button>
+                    <Button variant="outline" size="sm" onClick={() => setPage(totalPages)} disabled={page === totalPages}>{'>>'}</Button>
                   </div>
                 </div>
               </div>
@@ -636,7 +727,6 @@ export default function LaporanPage() {
         </>
       )}
 
-      {/* Empty state ketika belum ada data */}
       {!showData && !loading && (
         <Card>
           <CardContent className="py-12">
