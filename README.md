@@ -109,9 +109,13 @@ SUPABASE_SERVICE_ROLE_KEY=
 
 Dari mana mendapatkan nilainya?
 Masuk ke Supabase Dashboard → Project kamu → Project Settings → API
+
 NEXT_PUBLIC_SUPABASE_URL = Project URL
+
 NEXT_PUBLIC_SUPABASE_ANON_KEY = anon public api key
+
 SUPABASE_SERVICE_ROLE_KEY = service_role key (jangan gunakan di client/browser)
+
 
 Daftar variabel .env di atas mengacu pada catatan yang kamu berikan. 
 
